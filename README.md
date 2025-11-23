@@ -25,6 +25,28 @@ The pipeline.py file is the main file that contains the end to end pipeline for 
 **run_pipeline.py** is the main file that runs the pipeline. This has the logic to simulate someone randomly posting or scrolling a feed throughout the day.
 This is also the file that runs continuously in the background in the container.
 
+### Local Inference with Xortron2025:
+
+NEW: You can now run the agent with local inference using the Xortron2025 model instead of paid API services!
+
+**Benefits:**
+- 🆓 Free inference (no API costs)
+- 🔒 100% private (runs locally)
+- ⚡ Fast generation (after initial setup)
+- 🎨 Full control over model parameters
+
+**Setup:**
+
+```bash
+cd agent/local_inference
+./setup_llama_cpp.sh      # Build llama.cpp
+./download_xortron.sh     # Download Xortron2025 (19.3 GB)
+```
+
+**Requirements:** 21GB+ RAM for inference
+
+**Usage:** See `agent/local_inference/README.md` for full documentation and examples.
+
 ### Running the agent:
 
 docker-compose up -d
