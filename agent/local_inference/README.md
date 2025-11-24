@@ -12,9 +12,16 @@ This directory contains everything needed to run the **Xortron2025-24B** model l
 - **RAM Required**: ~21GB+ for inference
 - **Context Window**: 8192 tokens (configurable)
 
-### Model Datasets
+### Model Lineage
 
-The Xortron2025 model was trained on:
+The Xortron2025 model was created through this pipeline:
+1. **Base**: TroyDoesAI/BlackSheep-24B (24B parameter base model)
+2. **Fine-tuned**: darkc0de/Xortron24DPO (DPO fine-tuning)
+3. **Quantized**: darkc0de/Xortron2025 (Q6_K GGUF - this repo)
+
+### Training Datasets
+
+The model was trained on:
 - huihui-ai/Guilherme34_uncensor
 - mlabonne/orpo-dpo-mix-40k-flat
 - Undi95/toxic-dpo-v0.1-NoWarning
@@ -23,40 +30,111 @@ The Xortron2025 model was trained on:
 
 ## Quick Start
 
-### 1. Build llama.cpp
+### Platform-Specific Instructions
+
+#### Linux / macOS
+
+##### 1. Build llama.cpp
 
 ```bash
 cd agent/local_inference
 ./setup_llama_cpp.sh
 ```
 
-This will:
-- Clone the llama.cpp repository
-- Build the llama-cli binary using cmake
-- Place everything in `./llama.cpp/`
+##### 2. Download Xortron2025 Model
 
-**Requirements**:
-- cmake (version 3.10+)
-- C++ compiler (g++ or clang)
-- make
-
-### 2. Download Xortron2025 Model
-
+**Option A: Direct Download (Recommended)**
 ```bash
 ./download_xortron.sh
 ```
 
-This will:
-- Download the 19.3GB GGUF model file
-- Save it to `./models/Xortron2025-24B.Q6_K.gguf`
-- Support resume if download is interrupted (use Ctrl+C and re-run)
+**Option B: Git-LFS (Alternative)**
+```bash
+./download_xortron_lfs.sh
+```
 
-**Note**: The download will take significant time depending on your connection speed.
+The git-lfs method clones the entire Hugging Face repository, which includes:
+- The GGUF model file
+- README.md (model card)
+- config.json (model configuration)
 
-### 3. Test the Setup
+**Requirements for git-lfs**:
+```bash
+# Ubuntu/Debian
+sudo apt-get install git-lfs
+
+# macOS
+brew install git-lfs
+
+# Fedora
+sudo dnf install git-lfs
+
+# Then initialize
+git lfs install
+```
+
+##### 3. Verify Setup
 
 ```bash
-cd ..  # Back to agent directory
+python verify_setup.py
+```
+
+This comprehensive verification script checks:
+- llama.cpp is built correctly
+- Model is downloaded and valid
+- Python integration works
+- Basic inference functions
+- System requirements (RAM)
+
+#### Windows
+
+##### 1. Build llama.cpp
+
+**Requirements**:
+- cmake (download from https://cmake.org/download/)
+- Visual Studio Build Tools with "Desktop development with C++" workload
+
+```powershell
+cd agent\local_inference
+.\setup_llama_cpp.ps1
+```
+
+##### 2. Download Xortron2025 Model
+
+```powershell
+.\download_xortron.ps1
+```
+
+**Note**: Windows 10+ includes curl.exe by default.
+
+##### 3. Verify Setup
+
+```powershell
+python verify_setup.py
+```
+
+### Build Requirements
+
+**All Platforms**:
+- cmake (version 3.10+)
+- C++ compiler:
+  - Linux: g++ or clang
+  - macOS: Xcode Command Line Tools
+  - Windows: Visual Studio Build Tools
+
+### Manual Test (Cross-Platform)
+
+If you want to test manually without the verification script:
+
+```bash
+# Linux/macOS
+cd agent
+python -c "from local_inference.xortron_inference import XortronInference; x = XortronInference(); print(x.generate('Say hello in one sentence.', max_tokens=50))"
+```
+
+```powershell
+# Windows
+cd agent
 python -c "from local_inference.xortron_inference import XortronInference; x = XortronInference(); print(x.generate('Say hello in one sentence.', max_tokens=50))"
 ```
 

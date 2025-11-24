@@ -34,18 +34,30 @@ NEW: You can now run the agent with local inference using the Xortron2025 model 
 - 🔒 100% private (runs locally)
 - ⚡ Fast generation (after initial setup)
 - 🎨 Full control over model parameters
+- 🪟 Cross-platform support (Linux, macOS, Windows)
 
-**Setup:**
+**Quick Setup:**
 
 ```bash
+# Linux / macOS
 cd agent/local_inference
 ./setup_llama_cpp.sh      # Build llama.cpp
 ./download_xortron.sh     # Download Xortron2025 (19.3 GB)
+python verify_setup.py    # Verify installation
+
+# Windows (PowerShell)
+cd agent\local_inference
+.\setup_llama_cpp.ps1     # Build llama.cpp
+.\download_xortron.ps1    # Download Xortron2025 (19.3 GB)
+python verify_setup.py    # Verify installation
 ```
 
 **Requirements:** 21GB+ RAM for inference
 
-**Usage:** See `agent/local_inference/README.md` for full documentation and examples.
+**Documentation:**
+- **Quick Start**: `agent/local_inference/README.md`
+- **Complete Setup Guide**: `agent/local_inference/SETUP_GUIDE.md` (detailed walkthrough with troubleshooting)
+- **Examples**: `agent/local_inference/example_usage.py`
 
 ### Running the agent:
 

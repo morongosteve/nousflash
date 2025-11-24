@@ -47,9 +47,20 @@ class XortronInference:
         else:
             self.model_path = Path(model_path)
 
-        # Set llama-cli path
+        # Set llama-cli path (handle both Unix and Windows)
         if llama_cli_path is None:
-            self.llama_cli_path = self.base_dir / "llama.cpp" / "build" / "bin" / "llama-cli"
+            # Try Unix/macOS path first
+            llama_unix = self.base_dir / "llama.cpp" / "build" / "bin" / "llama-cli"
+            # Try Windows path
+            llama_windows = self.base_dir / "llama.cpp" / "build" / "bin" / "Release" / "llama-cli.exe"
+
+            if llama_unix.exists():
+                self.llama_cli_path = llama_unix
+            elif llama_windows.exists():
+                self.llama_cli_path = llama_windows
+            else:
+                # Default to Unix path for validation error message
+                self.llama_cli_path = llama_unix
         else:
             self.llama_cli_path = Path(llama_cli_path)
 
@@ -66,15 +77,29 @@ class XortronInference:
     def _validate_setup(self) -> None:
         """Validate that llama.cpp and model are available."""
         if not self.llama_cli_path.exists():
+            import platform
+            system = platform.system()
+            if system == "Windows":
+                setup_cmd = ".\\setup_llama_cpp.ps1"
+            else:
+                setup_cmd = "./setup_llama_cpp.sh"
+
             raise FileNotFoundError(
                 f"llama-cli not found at {self.llama_cli_path}. "
-                f"Run setup_llama_cpp.sh first."
+                f"Run {setup_cmd} first."
             )
 
         if not self.model_path.exists():
+            import platform
+            system = platform.system()
+            if system == "Windows":
+                download_cmd = ".\\download_xortron.ps1"
+            else:
+                download_cmd = "./download_xortron.sh"
+
             raise FileNotFoundError(
                 f"Model not found at {self.model_path}. "
-                f"Run download_xortron.sh first."
+                f"Run {download_cmd} first."
             )
 
     def generate(
