@@ -148,7 +148,9 @@ class PostingPipeline:
 
         reply_significance_score = score_reply_significance(
             content,
-            self.config.llm_api_key
+            self.config.llm_api_key,
+            inference_mode=self.config.inference_mode,
+            anthropic_api_key=self.config.anthropic_api_key,
         )
         print(f"Reply significance score: {reply_significance_score}")
 
@@ -332,7 +334,9 @@ class PostingPipeline:
         short_term_memory = generate_short_term_memory(
             recent_posts,
             notif_context,
-            self.config.llm_api_key
+            self.config.llm_api_key,
+            inference_mode=self.config.inference_mode,
+            anthropic_api_key=self.config.anthropic_api_key,
         )
         print(f"Short-term memory: {short_term_memory}")
 
@@ -365,7 +369,9 @@ class PostingPipeline:
 
         significance_score = score_significance(
             new_post_content,
-            self.config.llm_api_key
+            self.config.llm_api_key,
+            inference_mode=self.config.inference_mode,
+            anthropic_api_key=self.config.anthropic_api_key,
         )
         print(f"Significance score: {significance_score}")
 
