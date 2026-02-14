@@ -19,7 +19,6 @@ from engines.post_retriever import (
 )
 from engines.short_term_mem import generate_short_term_memory
 from engines.long_term_mem import create_embedding, retrieve_relevant_memories, store_memory
-from engines.post_maker import generate_post, generate_llm_response
 from engines.post_maker_local import generate_post_local, InferenceMode
 from engines.significance_scorer import score_significance, score_reply_significance
 from engines.post_sender import send_post, send_post_API
