@@ -1,5 +1,6 @@
 import requests
 import re
+import time
 from twitter.account import Account
 from twitter.scraper import Scraper
 from models import User
@@ -76,23 +77,32 @@ def decide_to_follow_users(db, posts, openrouter_api_key: str):
     []
     """
 
-    # Send the prompt to the AI model
-    response = requests.post(
-        url="https://openrouter.ai/api/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {openrouter_api_key}",
-        },
-        json={
-            "model": "meta-llama/llama-3.1-70b-instruct",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.7,
-        },
-    )
+    max_tries = 3
+    for attempt in range(1, max_tries + 1):
+        try:
+            response = requests.post(
+                url="https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {openrouter_api_key}",
+                },
+                json={
+                    "model": "meta-llama/llama-3.1-70b-instruct",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.7,
+                },
+                timeout=30,
+            )
 
-    if response.status_code == 200:
-        return response.json()["choices"][0]["message"]["content"]
-    else:
-        raise Exception(f"Error generating decision: {response.text}")
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+
+            print(f"Follow decision attempt {attempt}/{max_tries} failed: HTTP {response.status_code}: {response.text}")
+        except Exception as e:
+            print(f"Follow decision attempt {attempt}/{max_tries} error: {e}")
+
+        time.sleep(2 ** attempt)  # exponential back-off: 2s, 4s, 8s
+
+    return "[]"  # safe fallback — no follows rather than crashing the pipeline
 
 
 def get_user_id(account: Account, username):

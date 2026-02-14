@@ -1,160 +1,99 @@
-import requests
+import re
 import time
+import requests
 from engines.prompts import get_significance_score_prompt, get_reply_worthiness_score_prompt
 
-def score_significance(memory: str, llm_api_key: str) -> int:
+
+def _call_scorer(prompt: str, llm_api_key: str, inference_mode: str, anthropic_api_key: str) -> str:
     """
-    Score the significance of a memory on a scale of 1-10.
-    
-    Args:
-        memory (str): The memory to be scored
-        openrouter_api_key (str): API key for OpenRouter
-        your_site_url (str): Your site URL for OpenRouter API
-        your_app_name (str): Your app name for OpenRouter API
-    
-    Returns:
-        int: Significance score (1-10)
+    Call an LLM to get a score, routing to Anthropic or Hyperbolic based on inference_mode.
+    Returns the raw text content from the response, or raises on failure.
     """
+    if inference_mode == "anthropic":
+        try:
+            import anthropic as anthropic_sdk
+        except ImportError:
+            raise RuntimeError("anthropic package not installed; run: pip install anthropic")
+
+        client = anthropic_sdk.Anthropic(api_key=anthropic_api_key)
+        response = client.messages.create(
+            model="claude-3-5-haiku-20241022",  # Fast/cheap model for scoring
+            max_tokens=16,
+            messages=[
+                {"role": "user", "content": prompt + "\nRespond only with the numeric score."}
+            ],
+        )
+        return response.content[0].text.strip()
+
+    # Default: Hyperbolic
+    resp = requests.post(
+        url="https://api.hyperbolic.xyz/v1/chat/completions",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {llm_api_key}",
+        },
+        json={
+            "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": "Respond only with the score you would give for the given memory."},
+            ],
+            "model": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+            "temperature": 1,
+            "top_p": 0.95,
+            "top_k": 40,
+        },
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"Hyperbolic scorer HTTP {resp.status_code}: {resp.text}")
+    return resp.json()["choices"][0]["message"]["content"].strip()
+
+
+def _parse_score(raw: str) -> int:
+    """Extract an integer 1–10 from a model response."""
+    numbers = re.findall(r"\d+", raw)
+    if not numbers:
+        raise ValueError(f"No numeric score in response: {raw!r}")
+    return max(1, min(10, int(numbers[0])))
+
+
+def _score(
+    prompt: str,
+    llm_api_key: str,
+    inference_mode: str = "api",
+    anthropic_api_key: str = None,
+    max_tries: int = 5,
+) -> int:
+    """Shared retry loop for both scoring functions."""
+    for attempt in range(1, max_tries + 1):
+        try:
+            raw = _call_scorer(prompt, llm_api_key, inference_mode, anthropic_api_key)
+            if not raw:
+                print(f"Empty scorer response on attempt {attempt}")
+                continue
+            score = _parse_score(raw)
+            print(f"Score: {score} (raw: {raw!r})")
+            return score
+        except Exception as e:
+            print(f"Scorer attempt {attempt}/{max_tries} failed: {e}")
+            time.sleep(1)
+    return 5  # neutral fallback so the pipeline continues
+
+
+def score_significance(
+    memory: str,
+    llm_api_key: str,
+    inference_mode: str = "api",
+    anthropic_api_key: str = None,
+) -> int:
     prompt = get_significance_score_prompt(memory)
-
-    tries = 0
-    max_tries = 5
-    while tries < max_tries:
-        try:
-            response = requests.post(
-                url="https://api.hyperbolic.xyz/v1/chat/completions",
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {llm_api_key}",
-                },
-                json={
-                    "messages": [
-                        {
-                            "role": "system",
-        	                "content": prompt
-                        },
-                        {
-                            "role": "user",
-                            "content": "Respond only with the score you would give for the given memory."
-                        }
-                    ],
-                    "model": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-                    "temperature": 1,
-                    "top_p": 0.95,
-                    "top_k": 40,
-                }
-            )
-
-            if response.status_code == 200:
-                score_str = response.json()['choices'][0]['message']['content'].strip()
-                print(f"Score generated for memory: {score_str}")
-                if score_str == "":
-                    print(f"Empty response on attempt {tries + 1}")
-                    tries += 1
-                    continue
-                
-                try:
-                    # Extract the first number found in the response
-                    # This helps handle cases where the model includes additional text
-                    import re
-                    numbers = re.findall(r'\d+', score_str)
-                    if numbers:
-                        score = int(numbers[0])
-                        return max(1, min(10, score))  # Ensure the score is between 1 and 10
-                    else:
-                        print(f"No numerical score found in response: {score_str}")
-                        tries += 1
-                        continue
-                        
-                except ValueError:
-                    print(f"Invalid score returned: {score_str}")
-                    tries += 1
-                    continue
-            else:
-                print(f"Error on attempt {tries + 1}. Status code: {response.status_code}")
-                print(f"Response: {response.text}")
-                tries += 1
-                
-        except Exception as e:
-            print(f"Error on attempt {tries + 1}: {str(e)}")
-            tries += 1 
-            time.sleep(1)  # Add a small delay between retries
+    return _score(prompt, llm_api_key, inference_mode, anthropic_api_key)
 
 
-def score_reply_significance(tweet: str, llm_api_key: str) -> int:
-    """
-    Score the significance of a memory on a scale of 1-10.
-    
-    Args:
-        memory (str): The memory to be scored
-        openrouter_api_key (str): API key for OpenRouter
-        your_site_url (str): Your site URL for OpenRouter API
-        your_app_name (str): Your app name for OpenRouter API
-    
-    Returns:
-        int: Significance score (1-10)
-    """
+def score_reply_significance(
+    tweet: str,
+    llm_api_key: str,
+    inference_mode: str = "api",
+    anthropic_api_key: str = None,
+) -> int:
     prompt = get_reply_worthiness_score_prompt(tweet)
-
-    tries = 0
-    max_tries = 5
-    while tries < max_tries:
-        try:
-            response = requests.post(
-                url="https://api.hyperbolic.xyz/v1/chat/completions",
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {llm_api_key}",
-                },
-                json={
-                    "messages": [
-                        {
-                            "role": "system",
-        	                "content": prompt
-                        },
-                        {
-                            "role": "user",
-                            "content": "Respond only with the score you would give for the given memory."
-                        }
-                    ],
-                    "model": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-                    "temperature": 1,
-                    "top_p": 0.95,
-                    "top_k": 40,
-                }
-            )
-
-            if response.status_code == 200:
-                score_str = response.json()['choices'][0]['message']['content'].strip()
-                print(f"Score generated for memory: {score_str}")
-                if score_str == "":
-                    print(f"Empty response on attempt {tries + 1}")
-                    tries += 1
-                    continue
-                
-                try:
-                    # Extract the first number found in the response
-                    # This helps handle cases where the model includes additional text
-                    import re
-                    numbers = re.findall(r'\d+', score_str)
-                    if numbers:
-                        score = int(numbers[0])
-                        return max(1, min(10, score))  # Ensure the score is between 1 and 10
-                    else:
-                        print(f"No numerical score found in response: {score_str}")
-                        tries += 1
-                        continue
-                        
-                except ValueError:
-                    print(f"Invalid score returned: {score_str}")
-                    tries += 1
-                    continue
-            else:
-                print(f"Error on attempt {tries + 1}. Status code: {response.status_code}")
-                print(f"Response: {response.text}")
-                tries += 1
-                
-        except Exception as e:
-            print(f"Error on attempt {tries + 1}: {str(e)}")
-            tries += 1 
-            time.sleep(1)  # Add a small delay between retries
+    return _score(prompt, llm_api_key, inference_mode, anthropic_api_key)
