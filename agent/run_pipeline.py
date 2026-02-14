@@ -176,6 +176,7 @@ class PipelineRunner:
             "llm_api_key": os.getenv("HYPERBOLIC_API_KEY"),
             "openai_api_key": os.getenv("OPENAI_API_KEY"),
             "openrouter_api_key": os.getenv("OPENROUTER_API_KEY"),
+            "anthropic_api_key": os.getenv("ANTHROPIC_API_KEY"),
         }
 
     def get_twitter_config(self) -> Tuple[OAuth1, Account]:
@@ -208,6 +209,7 @@ class PipelineRunner:
             auth=auth,
             private_key_hex=private_key_hex,
             eth_mainnet_rpc_url=os.getenv("ETH_MAINNET_RPC_URL"),
+            inference_mode=os.getenv("INFERENCE_MODE", "api"),
             **api_keys
         )
 
