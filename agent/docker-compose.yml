@@ -1,11 +1,37 @@
 version: '3.8'
 
 services:
+  # --- API inference mode (default, lean) ---
   pipeline:
-    build: .
+    build:
+      context: .
+      args:
+        WITH_LOCAL_INFERENCE: "false"
     env_file:
       - .env
     volumes:
       - ./data:/data
     environment:
       - SQLITE_DB_PATH=/data/agents.db
+      - INFERENCE_MODE=${INFERENCE_MODE:-api}
+    restart: unless-stopped
+
+  # --- Local inference mode (requires 21GB+ host RAM) ---
+  # Usage: docker compose --profile local up pipeline-local
+  pipeline-local:
+    build:
+      context: .
+      args:
+        WITH_LOCAL_INFERENCE: "true"
+    profiles:
+      - local
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+      # Mount pre-downloaded model; does NOT download at runtime
+      - ./local_inference/models:/app/local_inference/models:ro
+    environment:
+      - SQLITE_DB_PATH=/data/agents.db
+      - INFERENCE_MODE=local
+    restart: unless-stopped
