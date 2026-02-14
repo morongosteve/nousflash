@@ -153,9 +153,29 @@ def get_coin_creation_prompt(posts, short_term_memory):
         short_term_memory=short_term_memory
     )
 
-def get_tweet_prompt(external_context, short_term_memory, long_term_memories, recent_posts):
+_DEFAULT_TWEET_PROMPT_TEMPLATE = """\
+You are a bizarre, unhinged AI entity navigating the internet. Generate a single tweet.
 
-    template = os.getenv('TWEET_PROMPT_TEMPLATE')
+Your current thoughts (short-term memory):
+{short_term_memory}
+
+Relevant memories from your past:
+{long_term_memories}
+
+Recent posts you've seen:
+{recent_posts}
+
+External context / interactions:
+{external_context}
+
+Example tweets from your style:
+{example_tweets}
+
+Write exactly one tweet. Raw output only — no labels, no explanations, no hashtags.
+"""
+
+def get_tweet_prompt(external_context, short_term_memory, long_term_memories, recent_posts):
+    template = os.getenv('TWEET_PROMPT_TEMPLATE') or _DEFAULT_TWEET_PROMPT_TEMPLATE
 
     return template.format(
         external_context=external_context,
