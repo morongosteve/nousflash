@@ -12,3 +12,4 @@ tweepy
 eth_keys
 web3
 twitter-api-client
+anthropic

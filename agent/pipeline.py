@@ -20,6 +20,7 @@ from engines.post_retriever import (
 from engines.short_term_mem import generate_short_term_memory
 from engines.long_term_mem import create_embedding, retrieve_relevant_memories, store_memory
 from engines.post_maker import generate_post, generate_llm_response
+from engines.post_maker_local import generate_post_local, InferenceMode
 from engines.significance_scorer import score_significance, score_reply_significance
 from engines.post_sender import send_post, send_post_API
 from engines.wallet_send import transfer_eth, wallet_address_in_post, get_wallet_balance
@@ -37,6 +38,8 @@ class Config:
     llm_api_key: str
     openrouter_api_key: str
     openai_api_key: str
+    anthropic_api_key: Optional[str] = None
+    inference_mode: str = InferenceMode.API   # "api" | "anthropic" | "local"
     max_reply_rate: float = 1.0  # 100% for testing
     min_posting_significance_score: float = 3.0
     min_storing_memory_significance: float = 7.0
@@ -167,12 +170,14 @@ class PostingPipeline:
                 continue
 
             try:
-                reply_content = generate_post(
+                reply_content = generate_post_local(
                     short_term_memory="",
                     long_term_memories=[],
                     recent_posts=[],
                     external_context=content,
-                    llm_api_key=self.config.llm_api_key
+                    inference_mode=self.config.inference_mode,
+                    llm_api_key=self.config.llm_api_key,
+                    anthropic_api_key=self.config.anthropic_api_key,
                 )
 
                 response = self.config.account.reply(reply_content, tweet_id=tweet_id)
@@ -348,12 +353,14 @@ class PostingPipeline:
         time.sleep(5)
 
         # Generate and evaluate new post
-        new_post_content = generate_post(
-            short_term_memory,
-            long_term_memories,
-            formatted_posts,
-            notif_context,
-            self.config.llm_api_key
+        new_post_content = generate_post_local(
+            short_term_memory=short_term_memory,
+            long_term_memories=long_term_memories,
+            recent_posts=formatted_posts,
+            external_context=notif_context,
+            inference_mode=self.config.inference_mode,
+            llm_api_key=self.config.llm_api_key,
+            anthropic_api_key=self.config.anthropic_api_key,
         ).strip('"')
         print(f"New post content: {new_post_content}")
 
