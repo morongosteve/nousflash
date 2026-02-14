@@ -150,7 +150,8 @@ class PipelineRunner:
     def setup_environment(self) -> None:
         """Initialize environment and database."""
         load_dotenv()
-        
+        self._validate_required_env()
+
         db_path = Path("./data/agents.db")
         if not db_path.exists():
             print("Creating database...")
@@ -160,6 +161,49 @@ class PipelineRunner:
             seed_database()
         else:
             print("Database already exists. Skipping creation and seeding.")
+
+    def _validate_required_env(self) -> None:
+        """Fail fast with a clear message if required env vars are missing."""
+        inference_mode = os.getenv("INFERENCE_MODE", "api")
+
+        # Always required
+        required = {
+            "X_CONSUMER_KEY": "Twitter OAuth 1.0a consumer key",
+            "X_CONSUMER_SECRET": "Twitter OAuth 1.0a consumer secret",
+            "X_ACCESS_TOKEN": "Twitter OAuth 1.0a access token",
+            "X_ACCESS_TOKEN_SECRET": "Twitter OAuth 1.0a access token secret",
+            "X_AUTH_TOKENS": "Twitter cookie auth tokens (JSON string)",
+            "X_USERNAME": "Twitter username",
+            "X_EMAIL": "Twitter email",
+            "X_PASSWORD": "Twitter password",
+            "OPENAI_API_KEY": "OpenAI key (used for memory embeddings)",
+            "OPENROUTER_API_KEY": "OpenRouter key (used for follow decisions)",
+        }
+
+        # Inference-mode-specific requirements
+        if inference_mode == "api":
+            required["HYPERBOLIC_API_KEY"] = "Hyperbolic API key (INFERENCE_MODE=api)"
+        elif inference_mode == "anthropic":
+            required["ANTHROPIC_API_KEY"] = "Anthropic API key (INFERENCE_MODE=anthropic)"
+        # local mode needs no API key
+
+        missing = {var: desc for var, desc in required.items() if not os.getenv(var)}
+        if missing:
+            lines = "\n".join(f"  {var}: {desc}" for var, desc in missing.items())
+            raise EnvironmentError(
+                f"Missing required environment variables:\n{lines}\n\n"
+                "Copy agent/.env.example to agent/.env and fill in the values."
+            )
+
+        # Validate X_AUTH_TOKENS is valid JSON before we try to parse it later
+        raw_tokens = os.getenv("X_AUTH_TOKENS", "")
+        try:
+            json.loads(raw_tokens)
+        except json.JSONDecodeError:
+            raise EnvironmentError(
+                "X_AUTH_TOKENS must be a valid JSON string "
+                "(e.g. {\"auth_token\": \"...\", \"ct0\": \"...\"})"
+            )
 
     def generate_eth_account(self) -> Tuple[str, str]:
         """Generate a new Ethereum account with private key and address."""
