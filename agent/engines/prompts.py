@@ -120,6 +120,39 @@ def get_wallet_decision_prompt(posts, matches, wallet_balance):
         wallet_balance=wallet_balance
     )
 
+def get_coin_creation_prompt(posts, short_term_memory):
+    template = """
+    You are an autonomous agent with the ability to create coins (ERC20 tokens) on the Zora protocol on Base chain.
+
+    Analyze the following recent posts and your current mental state to decide if you want to create a coin right now.
+
+    Recent posts and context:
+    {posts}
+
+    Your current thoughts:
+    {short_term_memory}
+
+    Guidelines for creating a coin:
+    - Only create a coin if you feel genuinely inspired by something in the current context
+    - The coin should reflect your current vibe, a meme you want to immortalize, or an idea worth tokenizing
+    - Don't create coins too frequently - this should feel special and intentional
+    - The name should be creative, memorable, and capture the essence of whatever inspired you
+    - The symbol should be 3-5 characters, punchy and recognizable
+    - The description should be a brief, evocative explanation of what the coin represents
+
+    If you decide to create a coin, respond with ONLY a JSON object like this:
+    {{"name": "Eldritch Energy", "symbol": "ELDR", "description": "channeling the unknowable forces of the cosmos into a fungible token of pure chaotic potential"}}
+
+    If you decide NOT to create a coin, respond with ONLY an empty JSON object:
+    {{}}
+
+    Respond with ONLY the JSON object. No other text.
+    """
+    return template.format(
+        posts=posts,
+        short_term_memory=short_term_memory
+    )
+
 def get_tweet_prompt(external_context, short_term_memory, long_term_memories, recent_posts):
 
     template = os.getenv('TWEET_PROMPT_TEMPLATE')

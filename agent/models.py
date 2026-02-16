@@ -84,6 +84,21 @@ class ShortTermMemory(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     # Add any other fields you might need for short-term memory
 
+class CreatedCoin(Base):
+    __tablename__ = "created_coins"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    symbol = Column(String, nullable=False)
+    description = Column(Text)
+    coin_address = Column(String)
+    tx_hash = Column(String, nullable=False)
+    metadata_uri = Column(String)
+    currency_type = Column(String, default="ETH")
+    chain_id = Column(Integer, default=8453)
+    tweet_id = Column(String)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 class TweetPost(Base):
     __tablename__ = "tweet_posts"
 
