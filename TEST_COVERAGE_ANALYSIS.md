@@ -162,6 +162,39 @@ The memory system is central to the agent's personality and decision-making.
 
 ---
 
+## Priority 7 (Lower) -- Deployment Infrastructure
+
+### `deploy/gcp_deploy.sh` / `deploy/digitalocean_deploy.sh`
+
+- Shell scripts that provision VMs, upload secrets, and bootstrap Docker containers.
+  While not unit-testable in the traditional sense, they should be validated with:
+  - **Shellcheck** linting to catch quoting bugs, unset variable issues, and portability
+    problems.
+  - **Dry-run mode** tests that verify argument parsing (`--local-inference` flag
+    correctly sets `MACHINE_TYPE`, `SIZE`, and `WITH_LOCAL_INFERENCE`).
+  - **Prerequisite checks** (`.env` file exists, CLI tools authenticated) should be
+    tested with mocked filesystem state.
+
+### `deploy/render.yaml`
+
+- YAML config validation: verify structure matches Render's schema and that all
+  required env vars are declared.
+
+### `agent/Dockerfile` / `agent/docker-compose.yml`
+
+- **Dockerfile**: The conditional `WITH_LOCAL_INFERENCE` build arg creates two distinct
+  image variants. Both should be validated in CI with `docker build` (no run required).
+- **docker-compose.yml**: The `pipeline-local` profile and volume mounts should be
+  tested with `docker compose config --profiles local` to verify valid configuration.
+
+### `agent/.env.example`
+
+- A simple test should verify that `.env.example` documents every environment variable
+  that the codebase reads via `os.getenv()`, and vice versa. This prevents config drift
+  where new code reads a variable that isn't in the template.
+
+---
+
 ## Recommended Test Infrastructure
 
 1. Add `pytest`, `pytest-cov`, and `responses` (HTTP mocking) to dev dependencies
@@ -169,3 +202,4 @@ The memory system is central to the agent's personality and decision-making.
 3. Mirror source layout: `tests/engines/test_wallet_send.py`, `tests/test_pipeline.py`
 4. Target 80%+ coverage on Priority 1-3 modules first
 5. Add a CI pipeline (GitHub Actions) to run tests on every push/PR
+6. Add `shellcheck` to CI for linting deployment scripts
