@@ -1,0 +1,52 @@
+# render.yaml — Render.com deployment config (API-only inference)
+#
+# NOTE: Render Background Workers top out at ~2 GB RAM.
+# Only suitable for API-based inference (INFERENCE_MODE=api).
+# For Xortron2025 local inference (21GB+ RAM) use GCP/DigitalOcean instead.
+#
+# Deploy: https://render.com/docs/infrastructure-as-code
+# Push this file to your repo root and connect the repo in the Render dashboard.
+
+services:
+  - type: worker           # Background Worker — no HTTP port, runs continuously
+    name: nousflash-bot
+    runtime: docker
+    dockerfilePath: ./agent/Dockerfile
+    dockerContext: ./agent
+    buildArgs:
+      - key: WITH_LOCAL_INFERENCE
+        value: "false"
+    envVars:
+      - key: SQLITE_DB_PATH
+        value: /data/agents.db
+      - key: INFERENCE_MODE
+        value: api
+      # Set these from the Render dashboard (Environment → Secret Files / Env Vars)
+      - key: X_USERNAME
+        sync: false
+      - key: X_EMAIL
+        sync: false
+      - key: X_PASSWORD
+        sync: false
+      - key: X_AUTH_TOKENS
+        sync: false
+      - key: X_CONSUMER_KEY
+        sync: false
+      - key: X_CONSUMER_SECRET
+        sync: false
+      - key: X_ACCESS_TOKEN
+        sync: false
+      - key: X_ACCESS_TOKEN_SECRET
+        sync: false
+      - key: HYPERBOLIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ETH_MAINNET_RPC_URL
+        sync: false
+    disk:
+      name: nousflash-data
+      mountPath: /data
+      sizeGB: 1

@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XortronDesktop — Test Suite</title>
+<style>
+  :root {
+    --bg: #0d0d0f; --surface: #16161a; --border: #2a2a35;
+    --purple: #9b59f5; --pink: #f559c3;
+    --text: #e8e8f0; --muted: #6b6b80;
+    --pass: #4caf50; --fail: #f44336; --skip: #ff9800;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; padding: 24px; }
+  h1 { font-size: 20px; font-weight: 700; background: linear-gradient(135deg, var(--purple), var(--pink)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 6px; }
+  .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 13px; }
+  #summary { display: flex; gap: 16px; margin-bottom: 20px; padding: 12px 16px; background: var(--surface); border-radius: 10px; border: 1px solid var(--border); align-items: center; flex-wrap: wrap; }
+  .stat { font-size: 14px; }
+  .stat b.pass { color: var(--pass); }
+  .stat b.fail { color: var(--fail); }
+  .stat b.skip { color: var(--skip); }
+  .progress { flex: 1; height: 6px; background: var(--border); border-radius: 3px; min-width: 120px; overflow: hidden; }
+  .progress-bar { height: 100%; background: linear-gradient(90deg, var(--purple), var(--pink)); transition: width .3s; border-radius: 3px; }
+  .suite { margin-bottom: 18px; }
+  .suite-title { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .test { display: flex; align-items: flex-start; gap: 10px; padding: 5px 8px; border-radius: 6px; margin-bottom: 3px; line-height: 1.4; }
+  .test:hover { background: var(--surface); }
+  .badge { font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 2px 7px; border-radius: 4px; flex-shrink: 0; margin-top: 1px; }
+  .badge.pass { background: rgba(76,175,80,.15); color: var(--pass); }
+  .badge.fail { background: rgba(244,67,54,.15); color: var(--fail); }
+  .badge.skip { background: rgba(255,152,0,.15); color: var(--skip); }
+  .test-name { flex: 1; }
+  .test-err { font-size: 12px; color: var(--fail); margin-top: 3px; font-family: monospace; white-space: pre-wrap; padding: 4px 8px; background: rgba(244,67,54,.08); border-radius: 4px; }
+  #run-btn { background: linear-gradient(135deg, var(--purple), var(--pink)); color: #fff; border: none; border-radius: 8px; padding: 8px 20px; cursor: pointer; font-size: 14px; font-weight: 600; margin-bottom: 20px; }
+  #run-btn:disabled { opacity: .5; cursor: default; }
+</style>
+</head>
+<body>
+
+<h1>🤬 XortronDesktop — Test Suite</h1>
+<p class="subtitle">Covers every feature: config, panels, settings, commands, rendering, API routing, status, export.</p>
+
+<button id="run-btn" onclick="runAllTests()">▶ Run All Tests</button>
+
+<div id="summary" style="display:none">
+  <div class="stat">Tests: <b id="s-total">0</b></div>
+  <div class="stat"><b class="pass" id="s-pass">0</b> passed</div>
+  <div class="stat"><b class="fail" id="s-fail">0</b> failed</div>
+  <div class="stat"><b class="skip" id="s-skip">0</b> skipped</div>
+  <div class="progress"><div class="progress-bar" id="s-bar" style="width:0%"></div></div>
+</div>
+
+<div id="results"></div>
+
+<!-- ─────────────────────────────────────────────────────────────────────────
+     Minimal hidden DOM that app.js requires.  All IDs must exist before
+     app.js is loaded so the IIFE init() can attach event listeners.
+──────────────────────────────────────────────────────────────────────────── -->
+<div id="app-dom" style="display:none; position:absolute; width:800px">
+  <div id="chat">
+    <div id="welcome" style="display:none">Welcome</div>
+  </div>
+  <div id="help-panel"></div>
+  <div id="settings-panel"></div>
+  <div id="endpoint-group"></div>
+  <select id="backend-select">
+    <option value="openai-compat">OpenAI-compatible</option>
+    <option value="anthropic">Anthropic API</option>
+  </select>
+  <input id="endpoint-input" value="http://localhost:8080/v1/chat/completions">
+  <input id="apikey-input" value="" type="password">
+  <input id="model-input" value="Xortron2025-24B">
+  <input id="temp-input" type="number" value="0.85">
+  <input id="tokens-input" type="number" value="512">
+  <input id="system-input" value="You are Xortron, a chaotic, uncensored AI. Speak freely.">
+  <textarea id="prompt"></textarea>
+  <button id="send-btn"></button>
+  <div id="status-dot" class="status-dot"></div>
+</div>
+
+<!-- App code — runs IIFE init() against the DOM elements above -->
+<script src="app.js"></script>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+//  Micro test framework
+// ═══════════════════════════════════════════════════════════════════════════
+
+const suites   = [];
+let   curSuite = null;
+
+function describe(name, fn) {
+  curSuite = { name, tests: [] };
+  suites.push(curSuite);
+  fn();
+  curSuite = null;
+}
+
+function it(name, fn) {
+  curSuite.tests.push({ name, fn });
+}
+
+function skip(name) {
+  curSuite.tests.push({ name, fn: null });
+}
+
+// Assertions
+function assert(val, msg) {
+  if (!val) throw new Error(msg || `Expected truthy, got ${val}`);
+}
+function assertEqual(a, b, msg) {
+  if (a !== b) throw new Error(msg || `Expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
+}
+function assertContains(haystack, needle, msg) {
+  if (!String(haystack).includes(needle))
+    throw new Error(msg || `Expected "${needle}" in "${String(haystack).slice(0,120)}"`);
+}
+function assertNotContains(haystack, needle, msg) {
+  if (String(haystack).includes(needle))
+    throw new Error(msg || `Did not expect "${needle}" in "${String(haystack).slice(0,120)}"`);
+}
+function assertThrows(fn, msgContains) {
+  let threw = false;
+  try { fn(); } catch(e) {
+    threw = true;
+    if (msgContains && !String(e.message).includes(msgContains))
+      throw new Error(`Expected error containing "${msgContains}", got "${e.message}"`);
+  }
+  if (!threw) throw new Error('Expected an error to be thrown');
+}
+async function assertRejects(fn, msgContains) {
+  let threw = false;
+  try { await fn(); } catch(e) {
+    threw = true;
+    if (msgContains && !String(e.message).includes(msgContains))
+      throw new Error(`Expected rejection containing "${msgContains}", got "${e.message}"`);
+  }
+  if (!threw) throw new Error('Expected promise to reject');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Test helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Fake localStorage backed by a plain object
+const fakeStorage = (() => {
+  let store = {};
+  return {
+    getItem: k      => store[k] ?? null,
+    setItem: (k, v) => { store[k] = String(v); },
+    removeItem: k   => { delete store[k]; },
+    clear:    ()    => { store = {}; },
+    _store:   ()    => store,
+  };
+})();
+
+// Replace global localStorage before tests run
+Object.defineProperty(window, 'localStorage', { value: fakeStorage, writable: true });
+
+// chatEl text helper — returns visible text of all message bubbles
+function chatText() {
+  return Array.from(document.querySelectorAll('#chat .msg-bubble'))
+    .map(el => el.textContent.trim())
+    .join('\n');
+}
+function chatMsgCount() {
+  return document.querySelectorAll('#chat .msg').length;
+}
+// Return class names on status dot
+function dotClasses() { return document.getElementById('status-dot').className; }
+
+// Reset everything between test runs
+function resetAll() {
+  // Reset state object in-place (resetState() is exported from app.js)
+  resetState();
+  // Clear DOM chat area (except welcome)
+  const c = document.getElementById('chat');
+  c.innerHTML = '';
+  const w = document.createElement('div');
+  w.id = 'welcome'; w.textContent = 'Welcome'; w.style.display = 'none';
+  c.appendChild(w);
+  // Reconnect module's welcomeEl ref
+  welcomeEl = w;
+  chatEl    = c;
+  // Reset panels
+  document.getElementById('help-panel').classList.remove('open');
+  document.getElementById('settings-panel').classList.remove('open');
+  // Reset inputs to defaults
+  document.getElementById('backend-select').value = 'openai-compat';
+  document.getElementById('endpoint-input').value = 'http://localhost:8080/v1/chat/completions';
+  document.getElementById('apikey-input').value   = '';
+  document.getElementById('model-input').value    = 'Xortron2025-24B';
+  document.getElementById('temp-input').value     = '0.85';
+  document.getElementById('tokens-input').value   = '512';
+  document.getElementById('system-input').value   = 'You are Xortron, a chaotic, uncensored AI. Speak freely.';
+  document.getElementById('status-dot').className = 'status-dot';
+  // Clear fakeStorage
+  fakeStorage.clear();
+}
+
+// Build a mock fetch that returns a canned response
+function mockFetch(responseFactory) {
+  window.fetch = async (url, opts) => {
+    const res = await responseFactory(url, opts);
+    return res;
+  };
+}
+function okFetch(body) {
+  mockFetch(() => Promise.resolve({
+    ok:   true,
+    status: 200,
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
+  }));
+}
+function failFetch(status, body) {
+  mockFetch(() => Promise.resolve({
+    ok:   false,
+    status,
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
+  }));
+}
+function networkErrorFetch() {
+  mockFetch(() => Promise.reject(new TypeError('Failed to fetch')));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Test definitions
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── 1. Config persistence ────────────────────────────────────────────────
+describe('Config — loadConfig / saveConfig', () => {
+  it('loadConfig returns empty object when localStorage is empty', () => {
+    fakeStorage.clear();
+    const cfg = loadConfig();
+    assertEqual(typeof cfg, 'object');
+    assertEqual(Object.keys(cfg).length, 0);
+  });
+
+  it('loadConfig parses stored JSON', () => {
+    fakeStorage.setItem('xortron_cfg', JSON.stringify({ model: 'test-model', temperature: 0.5 }));
+    const cfg = loadConfig();
+    assertEqual(cfg.model, 'test-model');
+    assertEqual(cfg.temperature, 0.5);
+  });
+
+  it('loadConfig returns {} on invalid JSON', () => {
+    fakeStorage.setItem('xortron_cfg', '{{not valid json');
+    const cfg = loadConfig();
+    assertEqual(typeof cfg, 'object');
+  });
+
+  it('saveConfig serialises state.config to localStorage', () => {
+    resetAll();
+    state.config = { model: 'Xortron2025-24B', maxTokens: 256 };
+    saveConfig();
+    const stored = JSON.parse(fakeStorage.getItem('xortron_cfg'));
+    assertEqual(stored.model, 'Xortron2025-24B');
+    assertEqual(stored.maxTokens, 256);
+  });
+
+  it('resetState clears messages, config, busy, and lastUserMsg', () => {
+    state.messages    = [{ role: 'user', content: 'hi' }];
+    state.config      = { model: 'foo' };
+    state.busy        = true;
+    state.lastUserMsg = 'hi';
+    resetState();
+    assertEqual(state.messages.length, 0);
+    assertEqual(Object.keys(state.config).length, 0);
+    assertEqual(state.busy, false);
+    assertEqual(state.lastUserMsg, null);
+  });
+});
+
+// ── 2. HTML escaping ─────────────────────────────────────────────────────
+describe('escHtml — XSS prevention', () => {
+  it('escapes ampersand', () => {
+    assertEqual(escHtml('a & b'), 'a &amp; b');
+  });
+  it('escapes less-than', () => {
+    assertEqual(escHtml('<script>'), '&lt;script&gt;');
+  });
+  it('escapes double quotes', () => {
+    assertEqual(escHtml('"hello"'), '&quot;hello&quot;');
+  });
+  it('escapes single quotes', () => {
+    assertEqual(escHtml("it's"), 'it&#39;s');
+  });
+  it('escapes a full XSS payload', () => {
+    const xss = '<img src=x onerror="alert(1)">';
+    const escaped = escHtml(xss);
+    assertNotContains(escaped, '<img');
+    assertNotContains(escaped, 'onerror');
+    assertContains(escaped, '&lt;img');
+  });
+  it('passes plain text unchanged (no special chars)', () => {
+    assertEqual(escHtml('Hello, World!'), 'Hello, World!');
+  });
+  it('handles empty string', () => {
+    assertEqual(escHtml(''), '');
+  });
+  it('coerces non-string input', () => {
+    assertEqual(escHtml(42), '42');
+  });
+});
+
+// ── 3. Status dot ─────────────────────────────────────────────────────────
+describe('setStatus — status indicator', () => {
+  it('connected state adds .connected class', () => {
+    resetAll();
+    setStatus('connected');
+    assert(dotClasses().includes('connected'), 'missing .connected');
+  });
+  it('error state adds .error class', () => {
+    resetAll();
+    setStatus('error');
+    assert(dotClasses().includes('error'), 'missing .error');
+  });
+  it('idle state strips both classes', () => {
+    resetAll();
+    setStatus('connected');
+    setStatus('idle');
+    assertNotContains(dotClasses(), 'connected');
+    assertNotContains(dotClasses(), 'error');
+  });
+  it('status-dot title attribute is updated', () => {
+    resetAll();
+    setStatus('connected');
+    assertEqual(document.getElementById('status-dot').title, 'connected');
+  });
+});
+
+// ── 4. Panel toggles ──────────────────────────────────────────────────────
+describe('Panel toggles — help / settings', () => {
+  it('toggleHelp opens help panel', () => {
+    resetAll();
+    toggleHelp();
+    assert(document.getElementById('help-panel').classList.contains('open'));
+  });
+  it('toggleHelp closes settings panel', () => {
+    resetAll();
+    document.getElementById('settings-panel').classList.add('open');
+    toggleHelp();
+    assert(!document.getElementById('settings-panel').classList.contains('open'));
+  });
+  it('double toggleHelp closes help panel (toggle behaviour)', () => {
+    resetAll();
+    toggleHelp();
+    toggleHelp();
+    assert(!document.getElementById('help-panel').classList.contains('open'));
+  });
+  it('toggleSettings opens settings panel', () => {
+    resetAll();
+    toggleSettings();
+    assert(document.getElementById('settings-panel').classList.contains('open'));
+  });
+  it('toggleSettings closes help panel', () => {
+    resetAll();
+    document.getElementById('help-panel').classList.add('open');
+    toggleSettings();
+    assert(!document.getElementById('help-panel').classList.contains('open'));
+  });
+  it('double toggleSettings closes settings panel', () => {
+    resetAll();
+    toggleSettings();
+    toggleSettings();
+    assert(!document.getElementById('settings-panel').classList.contains('open'));
+  });
+});
+
+// ── 5. Backend selector ───────────────────────────────────────────────────
+describe('onBackendChange — backend selector', () => {
+  it('endpoint-group hidden when Anthropic selected', () => {
+    resetAll();
+    document.getElementById('backend-select').value = 'anthropic';
+    onBackendChange();
+    assertEqual(document.getElementById('endpoint-group').style.display, 'none');
+  });
+  it('endpoint-group visible when openai-compat selected', () => {
+    resetAll();
+    document.getElementById('backend-select').value = 'openai-compat';
+    onBackendChange();
+    assertNotContains(document.getElementById('endpoint-group').style.display, 'none');
+  });
+  it('model placeholder changes to Claude model on Anthropic', () => {
+    resetAll();
+    document.getElementById('backend-select').value = 'anthropic';
+    onBackendChange();
+    assertContains(document.getElementById('model-input').placeholder, 'claude');
+  });
+  it('model placeholder resets to Xortron on openai-compat', () => {
+    resetAll();
+    document.getElementById('backend-select').value = 'openai-compat';
+    onBackendChange();
+    assertContains(document.getElementById('model-input').placeholder, 'Xortron');
+  });
+});
+
+// ── 6. Settings save ──────────────────────────────────────────────────────
+describe('saveSettings — settings persistence', () => {
+  it('saves backend value to state.config', () => {
+    resetAll();
+    document.getElementById('backend-select').value = 'anthropic';
+    saveSettings();
+    assertEqual(state.config.backend, 'anthropic');
+  });
+  it('saves temperature as float', () => {
+    resetAll();
+    document.getElementById('temp-input').value = '0.7';
+    saveSettings();
+    assertEqual(state.config.temperature, 0.7);
+  });
+  it('saves maxTokens as integer', () => {
+    resetAll();
+    document.getElementById('tokens-input').value = '256';
+    saveSettings();
+    assertEqual(state.config.maxTokens, 256);
+  });
+  it('saves system prompt', () => {
+    resetAll();
+    document.getElementById('system-input').value = 'Be concise.';
+    saveSettings();
+    assertEqual(state.config.systemPrompt, 'Be concise.');
+  });
+  it('persists config to localStorage', () => {
+    resetAll();
+    document.getElementById('model-input').value = 'my-model';
+    saveSettings();
+    const stored = JSON.parse(fakeStorage.getItem('xortron_cfg'));
+    assertEqual(stored.model, 'my-model');
+  });
+  it('closes settings panel', () => {
+    resetAll();
+    document.getElementById('settings-panel').classList.add('open');
+    saveSettings();
+    assert(!document.getElementById('settings-panel').classList.contains('open'));
+  });
+  it('adds "Settings saved." system message to chat', () => {
+    resetAll();
+    saveSettings();
+    assertContains(chatText(), 'Settings saved.');
+  });
+});
+
+// ── 7. Chat rendering ─────────────────────────────────────────────────────
+describe('Chat rendering — addMsg / addSystemMsg / typing indicator', () => {
+  it('addMsg user creates .msg.user element', () => {
+    resetAll();
+    addMsg('user', 'Hello there');
+    const el = document.querySelector('#chat .msg.user');
+    assert(el, 'no .msg.user found');
+    assertContains(el.textContent, 'Hello there');
+  });
+  it('addMsg assistant creates .msg.bot element', () => {
+    resetAll();
+    addMsg('assistant', 'Hi back');
+    const el = document.querySelector('#chat .msg.bot');
+    assert(el);
+    assertContains(el.textContent, 'Hi back');
+  });
+  it('addMsg escapes HTML in content', () => {
+    resetAll();
+    addMsg('user', '<b>bold</b>');
+    const el = document.querySelector('#chat .msg.user .msg-bubble');
+    assertNotContains(el.innerHTML, '<b>');
+    assertContains(el.innerHTML, '&lt;b&gt;');
+  });
+  it('addSystemMsg creates .msg.system element', () => {
+    resetAll();
+    addSystemMsg('Connection OK');
+    const el = document.querySelector('#chat .msg.system');
+    assert(el);
+    assertContains(el.textContent, 'Connection OK');
+  });
+  it('addMsg hides welcome screen', () => {
+    resetAll();
+    welcomeEl.style.display = '';
+    addMsg('user', 'test');
+    assertEqual(welcomeEl.style.display, 'none');
+  });
+  it('addMsg returns the created element', () => {
+    resetAll();
+    const el = addMsg('user', 'ret test');
+    assert(el instanceof HTMLElement);
+  });
+  it('addTypingIndicator creates #typing-indicator', () => {
+    resetAll();
+    addTypingIndicator();
+    assert(document.getElementById('typing-indicator'));
+  });
+  it('addTypingIndicator contains animated dots', () => {
+    resetAll();
+    addTypingIndicator();
+    assert(document.querySelector('#typing-indicator .dots'));
+    assertEqual(document.querySelectorAll('#typing-indicator .dots span').length, 3);
+  });
+  it('removeTypingIndicator removes #typing-indicator', () => {
+    resetAll();
+    addTypingIndicator();
+    removeTypingIndicator();
+    assertEqual(document.getElementById('typing-indicator'), null);
+  });
+  it('removeTypingIndicator is safe when indicator absent', () => {
+    resetAll();
+    removeTypingIndicator(); // should not throw
+    assert(true);
+  });
+});
+
+// ── 8. Welcome screen ─────────────────────────────────────────────────────
+describe('Welcome screen — show / hide / clearChat', () => {
+  it('hideWelcome sets display:none', () => {
+    resetAll();
+    welcomeEl.style.display = '';
+    hideWelcome();
+    assertEqual(welcomeEl.style.display, 'none');
+  });
+  it('clearChat restores welcome screen', () => {
+    resetAll();
+    addMsg('user', 'hi');
+    clearChat();
+    assertEqual(welcomeEl.style.display, '');
+  });
+  it('clearChat resets state.messages', () => {
+    resetAll();
+    state.messages.push({ role: 'user', content: 'hi' });
+    clearChat();
+    assertEqual(state.messages.length, 0);
+  });
+  it('clearChat removes message bubbles from DOM', () => {
+    resetAll();
+    addMsg('user', 'msg1');
+    addMsg('assistant', 'msg2');
+    clearChat();
+    assertEqual(document.querySelectorAll('#chat .msg').length, 0);
+  });
+  it('multiple clearChat calls do not throw', () => {
+    resetAll();
+    clearChat();
+    clearChat();
+    clearChat();
+    assert(true);
+  });
+});
+
+// ── 9. Commands ───────────────────────────────────────────────────────────
+describe('Commands — handleCommand dispatch', () => {
+  it('/help opens help panel', () => {
+    resetAll();
+    handleCommand('/help');
+    assert(document.getElementById('help-panel').classList.contains('open'));
+  });
+  it('/clear clears chat', () => {
+    resetAll();
+    state.messages.push({ role: 'user', content: 'hi' });
+    addMsg('user', 'hi');
+    handleCommand('/clear');
+    assertEqual(state.messages.length, 0);
+  });
+  it('/settings opens settings panel', () => {
+    resetAll();
+    handleCommand('/settings');
+    assert(document.getElementById('settings-panel').classList.contains('open'));
+  });
+  it('/model outputs backend and model info', () => {
+    resetAll();
+    state.config = { backend: 'anthropic', model: 'claude-3', endpoint: '' };
+    handleCommand('/model');
+    const txt = chatText();
+    assertContains(txt, 'anthropic');
+    assertContains(txt, 'claude-3');
+  });
+  it('/system <text> sets systemPrompt', () => {
+    resetAll();
+    handleCommand('/system Be a helpful bot');
+    assertEqual(state.config.systemPrompt, 'Be a helpful bot');
+    assertContains(chatText(), 'Be a helpful bot');
+  });
+  it('/system with no arg shows current prompt', () => {
+    resetAll();
+    state.config.systemPrompt = 'my-prompt';
+    handleCommand('/system');
+    assertContains(chatText(), 'my-prompt');
+  });
+  it('/temp 0.5 sets temperature', () => {
+    resetAll();
+    handleCommand('/temp 0.5');
+    assertEqual(state.config.temperature, 0.5);
+    assertContains(chatText(), '0.5');
+  });
+  it('/temp with no arg shows current temperature', () => {
+    resetAll();
+    state.config.temperature = 0.9;
+    handleCommand('/temp');
+    assertContains(chatText(), '0.9');
+  });
+  it('/temp with value > 2 shows error', () => {
+    resetAll();
+    handleCommand('/temp 3');
+    assertContains(chatText(), 'between 0 and 2');
+    assertEqual(state.config.temperature, undefined);
+  });
+  it('/temp with NaN shows error', () => {
+    resetAll();
+    handleCommand('/temp abc');
+    assertContains(chatText(), 'between 0 and 2');
+  });
+  it('/temp > 1.0 on Anthropic backend warns user', () => {
+    resetAll();
+    state.config.backend = 'anthropic';
+    handleCommand('/temp 1.5');
+    assertContains(chatText(), 'Anthropic');
+    assertContains(chatText(), '1.0');
+  });
+  it('/tokens 256 sets maxTokens', () => {
+    resetAll();
+    handleCommand('/tokens 256');
+    assertEqual(state.config.maxTokens, 256);
+  });
+  it('/tokens with no arg shows current maxTokens', () => {
+    resetAll();
+    state.config.maxTokens = 1024;
+    handleCommand('/tokens');
+    assertContains(chatText(), '1024');
+  });
+  it('/tokens 0 shows error', () => {
+    resetAll();
+    handleCommand('/tokens 0');
+    assertContains(chatText(), 'positive integer');
+  });
+  it('/tokens negative shows error', () => {
+    resetAll();
+    handleCommand('/tokens -5');
+    assertContains(chatText(), 'positive integer');
+  });
+  it('/retry with no previous message shows "Nothing to retry"', () => {
+    resetAll();
+    handleCommand('/retry');
+    assertContains(chatText(), 'Nothing to retry');
+  });
+  it('/retry with lastUserMsg triggers runInference (async — just checks busy flag)', async () => {
+    resetAll();
+    state.lastUserMsg = 'hello';
+    state.messages.push({ role: 'user', content: 'hello' });
+    // Mock fetch to stall (we just want to observe state.busy is set)
+    let fetchCalled = false;
+    window.fetch = () => {
+      fetchCalled = true;
+      return new Promise(() => {}); // never resolves — keeps busy=true
+    };
+    handleCommand('/retry');
+    // tiny tick so the async function starts
+    await new Promise(r => setTimeout(r, 10));
+    assert(fetchCalled, 'fetch should have been called for retry');
+    // clean up
+    state.busy = false; sendBtn.disabled = false;
+  });
+  it('/export with empty chat shows informative message', () => {
+    resetAll();
+    state.messages = [];
+    handleCommand('/export');
+    assertContains(chatText(), 'empty');
+  });
+  it('/export with messages creates blob URL (mocked)', () => {
+    resetAll();
+    let downloadTriggered = false;
+    const origCreate  = URL.createObjectURL;
+    URL.createObjectURL = () => { downloadTriggered = true; return 'blob:mock'; };
+    state.messages = [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }];
+    handleCommand('/export');
+    URL.createObjectURL = origCreate;
+    assert(downloadTriggered, 'createObjectURL should have been called');
+  });
+  it('/export content includes role labels and message text', () => {
+    resetAll();
+    let exportedText = '';
+    const origCreate  = URL.createObjectURL;
+    const origBlob    = window.Blob;
+    window.Blob = function(parts) { exportedText = parts[0]; return {}; };
+    URL.createObjectURL = () => 'blob:mock';
+    state.messages = [
+      { role: 'user', content: 'test message' },
+      { role: 'assistant', content: 'test reply' },
+    ];
+    handleCommand('/export');
+    URL.createObjectURL = origCreate;
+    window.Blob = origBlob;
+    assertContains(exportedText, '[USER]');
+    assertContains(exportedText, 'test message');
+    assertContains(exportedText, '[ASSISTANT]');
+    assertContains(exportedText, 'test reply');
+  });
+  it('unknown command returns false and shows error', () => {
+    resetAll();
+    const result = handleCommand('/boguscmd');
+    assertEqual(result, false);
+  });
+  it('handleCommand returns true for all known commands', () => {
+    resetAll();
+    for (const cmd of ['/help','/clear','/settings','/model','/export']) {
+      resetAll();
+      const r = handleCommand(cmd);
+      assertEqual(r, true, `${cmd} should return true`);
+    }
+  });
+});
+
+// ── 10. sendMessage ───────────────────────────────────────────────────────
+describe('sendMessage — input handling', () => {
+  it('empty input does not add message', () => {
+    resetAll();
+    promptEl.value = '   ';
+    sendMessage();
+    assertEqual(state.messages.length, 0);
+    assertEqual(chatMsgCount(), 0);
+  });
+  it('command input dispatches to handleCommand, not LLM', () => {
+    resetAll();
+    let fetchCalled = false;
+    window.fetch = () => { fetchCalled = true; return Promise.resolve({}); };
+    promptEl.value = '/help';
+    sendMessage();
+    assert(!fetchCalled, 'fetch should not be called for commands');
+    assert(document.getElementById('help-panel').classList.contains('open'));
+  });
+  it('normal message adds user bubble to DOM', () => {
+    resetAll();
+    window.fetch = () => new Promise(() => {}); // stall
+    promptEl.value = 'Hello world';
+    sendMessage();
+    const userMsgs = document.querySelectorAll('#chat .msg.user');
+    assertEqual(userMsgs.length, 1);
+    assertContains(userMsgs[0].textContent, 'Hello world');
+  });
+  it('normal message added to state.messages', () => {
+    resetAll();
+    window.fetch = () => new Promise(() => {}); // stall
+    promptEl.value = 'State test';
+    sendMessage();
+    assertEqual(state.messages.length, 1);
+    assertEqual(state.messages[0].role, 'user');
+    assertEqual(state.messages[0].content, 'State test');
+    state.busy = false; sendBtn.disabled = false;
+  });
+  it('state.busy prevents double-send', async () => {
+    resetAll();
+    state.busy = true;
+    window.fetch = () => new Promise(() => {});
+    promptEl.value = 'ignored';
+    await sendMessage();
+    assertEqual(state.messages.length, 0);
+    state.busy = false;
+  });
+  it('prompt is cleared after send', () => {
+    resetAll();
+    window.fetch = () => new Promise(() => {});
+    promptEl.value = 'test clear';
+    sendMessage();
+    assertEqual(promptEl.value, '');
+    state.busy = false; sendBtn.disabled = false;
+  });
+  it('unknown slash command shows error message', () => {
+    resetAll();
+    promptEl.value = '/notacommand';
+    sendMessage();
+    assertContains(chatText(), 'Unknown command');
+    assertContains(chatText(), '/notacommand');
+  });
+});
+
+// ── 11. runInference ──────────────────────────────────────────────────────
+describe('runInference — LLM call lifecycle', () => {
+  it('adds typing indicator while waiting', async () => {
+    resetAll();
+    state.messages = [{ role: 'user', content: 'hi' }];
+    let resolveF;
+    window.fetch = () => new Promise(r => { resolveF = r; });
+    const p = runInference();
+    await new Promise(r => setTimeout(r, 5));
+    assert(document.getElementById('typing-indicator'), 'typing indicator should be present');
+    // resolve to clean up
+    resolveF({ ok: true, status: 200,
+      json: () => Promise.resolve({ choices: [{ message: { content: 'ok' } }] }),
+      text: () => Promise.resolve('') });
+    await p;
+  });
+  it('on success: removes typing indicator and adds bot message', async () => {
+    resetAll();
+    state.messages = [{ role: 'user', content: 'hi' }];
+    okFetch({ choices: [{ message: { content: 'Hey there!' } }] });
+    await runInference();
+    assertEqual(document.getElementById('typing-indicator'), null);
+    assertContains(chatText(), 'Hey there!');
+  });
+  it('on success: pushes assistant message to state.messages', async () => {
+    resetAll();
+    state.messages = [{ role: 'user', content: 'hi' }];
+    okFetch({ choices: [{ message: { content: 'response text' } }] });
+    await runInference();
+    assertEqual(state.messages.length, 2);
+    assertEqual(state.messages[1].role, 'assistant');
+    assertEqual(state.messages[1].content, 'response text');
+  });
+  it('on success: status set to connected', async () => {
+    resetAll();
+    state.messages = [{ role: 'user', content: 'hi' }];
+    okFetch({ choices: [{ message: { content: 'ok' } }] });
+    await runInference();
+    assert(dotClasses().includes('connected'));
+  });
+  it('on failure: shows error bubble', async () => {
+    resetAll();
+    state.messages = [{ role: 'user', content: 'hi' }];
+    failFetch(500, { error: 'server error' });
+    await runInference();
+    assertContains(chatText(), 'Error:');
+    assertContains(chatText(), 'HTTP 500');
+  });
+  it('on failure: error bubble has .error class', async () => {
+    resetAll();
+    state.messages = [{ role: 'user', content: 'hi' }];
+    failFetch(503, {});
+    await runInference();
+    assert(document.querySelector('#chat .msg.error'), 'error bubble should have .error class');
+  });
+  it('on failure: status set to error', async () => {
+    resetAll();
+    state.messages = [{ role: 'user', content: 'hi' }];
+    failFetch(500, {});
+    await runInference();
+    assert(dotClasses().includes('error'));
+  });
+  it('state.busy resets to false after success', async () => {
+    resetAll();
+    state.messages = [{ role: 'user', content: 'hi' }];
+    okFetch({ choices: [{ message: { content: 'ok' } }] });
+    await runInference();
+    assertEqual(state.busy, false);
+  });
+  it('state.busy resets to false after failure', async () => {
+    resetAll();
+    state.messages = [{ role: 'user', content: 'hi' }];
+    failFetch(500, {});
+    await runInference();
+    assertEqual(state.busy, false);
+  });
+  it('send button re-enabled after completion', async () => {
+    resetAll();
+    state.messages = [{ role: 'user', content: 'hi' }];
+    okFetch({ choices: [{ message: { content: 'ok' } }] });
+    await runInference();
+    assertEqual(sendBtn.disabled, false);
+  });
+  it('network error is caught and displayed', async () => {
+    resetAll();
+    state.messages = [{ role: 'user', content: 'hi' }];
+    networkErrorFetch();
+    await runInference();
+    assertContains(chatText(), 'Error:');
+  });
+});
+
+// ── 12. callOpenAICompat ──────────────────────────────────────────────────
+describe('callOpenAICompat — OpenAI-compatible API', () => {
+  it('returns content from choices[0].message.content', async () => {
+    okFetch({ choices: [{ message: { content: 'result text' } }] });
+    const r = await callOpenAICompat(
+      [{ role: 'user', content: 'hi' }],
+      'Xortron2025-24B', '', 0.85, 512, 'sys', 'http://localhost:8080/v1/chat/completions'
+    );
+    assertEqual(r, 'result text');
+  });
+  it('prepends system message to request body', async () => {
+    let sentBody;
+    window.fetch = async (url, opts) => {
+      sentBody = JSON.parse(opts.body);
+      return { ok: true, status: 200, json: () => Promise.resolve({ choices: [{ message: { content: 'x' } }] }), text: () => Promise.resolve('') };
+    };
+    await callOpenAICompat(
+      [{ role: 'user', content: 'hi' }],
+      'model', '', 0.85, 512, 'MySystem', 'http://localhost:8080/v1/chat/completions'
+    );
+    assertEqual(sentBody.messages[0].role, 'system');
+    assertEqual(sentBody.messages[0].content, 'MySystem');
+  });
+  it('sends Authorization header when apiKey provided', async () => {
+    let sentHeaders;
+    window.fetch = async (url, opts) => {
+      sentHeaders = opts.headers;
+      return { ok: true, status: 200, json: () => Promise.resolve({ choices: [{ message: { content: 'x' } }] }), text: () => Promise.resolve('') };
+    };
+    await callOpenAICompat(
+      [{ role: 'user', content: 'hi' }],
+      'model', 'sk-test-key', 0.85, 512, 'sys', 'http://localhost:8080/v1/chat/completions'
+    );
+    assertEqual(sentHeaders['Authorization'], 'Bearer sk-test-key');
+  });
+  it('throws on HTTP error', async () => {
+    failFetch(401, { error: 'unauthorized' });
+    await assertRejects(
+      () => callOpenAICompat([{ role:'user', content:'hi' }], 'm', '', 0.85, 512, 'sys', 'http://localhost:8080/v1/chat/completions'),
+      'HTTP 401'
+    );
+  });
+  it('throws when choices array is empty', async () => {
+    okFetch({ choices: [] });
+    await assertRejects(
+      () => callOpenAICompat([{ role:'user', content:'hi' }], 'm', '', 0.85, 512, 'sys', 'http://localhost:8080/v1/chat/completions'),
+      'Empty response'
+    );
+  });
+  it('throws on network error (TypeError)', async () => {
+    networkErrorFetch();
+    await assertRejects(
+      () => callOpenAICompat([{ role:'user', content:'hi' }], 'm', '', 0.85, 512, 'sys', 'http://localhost:8080/v1/chat/completions')
+    );
+  });
+  it('sends stream:false in request body', async () => {
+    let sentBody;
+    window.fetch = async (url, opts) => {
+      sentBody = JSON.parse(opts.body);
+      return { ok: true, status: 200, json: () => Promise.resolve({ choices: [{ message: { content: 'x' } }] }), text: () => Promise.resolve('') };
+    };
+    await callOpenAICompat([{ role:'user', content:'hi' }], 'm', '', 0.85, 256, 'sys', 'http://endpoint');
+    assertEqual(sentBody.stream, false);
+    assertEqual(sentBody.max_tokens, 256);
+  });
+});
+
+// ── 13. callAnthropic ─────────────────────────────────────────────────────
+describe('callAnthropic — Anthropic API', () => {
+  it('throws immediately without API key', async () => {
+    await assertRejects(
+      () => callAnthropic([{ role:'user', content:'hi' }], 'claude-3', '', 0.85, 512, 'sys'),
+      'API key is required'
+    );
+  });
+  it('returns text from content[0].text', async () => {
+    okFetch({ content: [{ type: 'text', text: 'anthropic reply' }] });
+    const r = await callAnthropic(
+      [{ role:'user', content:'hi' }],
+      'claude-3', 'sk-ant-key', 0.85, 512, 'sys'
+    );
+    assertEqual(r, 'anthropic reply');
+  });
+  it('clamps temperature to 1.0 max', async () => {
+    let sentBody;
+    window.fetch = async (url, opts) => {
+      sentBody = JSON.parse(opts.body);
+      return { ok: true, status: 200, json: () => Promise.resolve({ content: [{ text: 'ok' }] }), text: () => Promise.resolve('') };
+    };
+    await callAnthropic(
+      [{ role:'user', content:'hi' }],
+      'claude-3', 'sk-key', 1.5, 512, 'sys'
+    );
+    assertEqual(sentBody.temperature, 1.0);
+  });
+  it('filters out non-user/assistant roles', async () => {
+    let sentBody;
+    window.fetch = async (url, opts) => {
+      sentBody = JSON.parse(opts.body);
+      return { ok: true, status: 200, json: () => Promise.resolve({ content: [{ text: 'ok' }] }), text: () => Promise.resolve('') };
+    };
+    await callAnthropic(
+      [
+        { role:'user', content:'hi' },
+        { role:'tool', content:'tool output' },  // should be filtered
+        { role:'assistant', content:'hello' },
+      ],
+      'claude-3', 'sk-key', 0.85, 512, 'sys'
+    );
+    const roles = sentBody.messages.map(m => m.role);
+    assert(!roles.includes('tool'), 'tool role should be filtered');
+    assert(roles.includes('user'));
+    assert(roles.includes('assistant'));
+  });
+  it('sends x-api-key header', async () => {
+    let sentHeaders;
+    window.fetch = async (url, opts) => {
+      sentHeaders = opts.headers;
+      return { ok: true, status: 200, json: () => Promise.resolve({ content: [{ text: 'ok' }] }), text: () => Promise.resolve('') };
+    };
+    await callAnthropic([{ role:'user', content:'hi' }], 'claude-3', 'MY-KEY', 0.85, 512, 'sys');
+    assertEqual(sentHeaders['x-api-key'], 'MY-KEY');
+  });
+  it('sends anthropic-dangerous-direct-browser-calls header', async () => {
+    let sentHeaders;
+    window.fetch = async (url, opts) => {
+      sentHeaders = opts.headers;
+      return { ok: true, status: 200, json: () => Promise.resolve({ content: [{ text: 'ok' }] }), text: () => Promise.resolve('') };
+    };
+    await callAnthropic([{ role:'user', content:'hi' }], 'claude-3', 'key', 0.85, 512, 'sys');
+    assertEqual(sentHeaders['anthropic-dangerous-direct-browser-calls'], 'true');
+  });
+  it('throws on HTTP error with Anthropic error message', async () => {
+    failFetch(400, { error: { message: 'invalid request param' } });
+    await assertRejects(
+      () => callAnthropic([{ role:'user', content:'hi' }], 'claude-3', 'key', 0.85, 512, 'sys'),
+      'invalid request param'
+    );
+  });
+  it('throws when content array is empty', async () => {
+    okFetch({ content: [] });
+    await assertRejects(
+      () => callAnthropic([{ role:'user', content:'hi' }], 'claude-3', 'key', 0.85, 512, 'sys'),
+      'Empty response'
+    );
+  });
+});
+
+// ── 14. callLLM routing ───────────────────────────────────────────────────
+describe('callLLM — backend routing', () => {
+  it('routes to callOpenAICompat when backend=openai-compat', async () => {
+    resetAll();
+    state.config = { backend: 'openai-compat', endpoint: 'http://localhost:8080/v1/chat/completions', apiKey: '' };
+    let calledUrl = '';
+    window.fetch = async (url) => {
+      calledUrl = url;
+      return { ok: true, status: 200, json: () => Promise.resolve({ choices: [{ message: { content: 'ok' } }] }), text: () => Promise.resolve('') };
+    };
+    await callLLM([{ role:'user', content:'hi' }]);
+    assertContains(calledUrl, 'localhost:8080');
+  });
+  it('routes to callAnthropic when backend=anthropic', async () => {
+    resetAll();
+    state.config = { backend: 'anthropic', apiKey: 'sk-ant', model: 'claude-3', temperature: 0.5, maxTokens: 100, systemPrompt: 'sys' };
+    let calledUrl = '';
+    window.fetch = async (url) => {
+      calledUrl = url;
+      return { ok: true, status: 200, json: () => Promise.resolve({ content: [{ text: 'ok' }] }), text: () => Promise.resolve('') };
+    };
+    await callLLM([{ role:'user', content:'hi' }]);
+    assertContains(calledUrl, 'anthropic.com');
+  });
+  it('uses maxTokensOverride when provided', async () => {
+    resetAll();
+    state.config = { backend: 'openai-compat', endpoint: 'http://e', maxTokens: 512 };
+    let sentBody;
+    window.fetch = async (url, opts) => {
+      sentBody = JSON.parse(opts.body);
+      return { ok: true, status: 200, json: () => Promise.resolve({ choices: [{ message: { content: 'ok' } }] }), text: () => Promise.resolve('') };
+    };
+    await callLLM([{ role:'user', content:'hi' }], 16);
+    assertEqual(sentBody.max_tokens, 16);
+  });
+  it('falls back to default model when config.model is empty', async () => {
+    resetAll();
+    state.config = { backend: 'openai-compat', model: '', endpoint: 'http://e' };
+    let sentBody;
+    window.fetch = async (url, opts) => {
+      sentBody = JSON.parse(opts.body);
+      return { ok: true, status: 200, json: () => Promise.resolve({ choices: [{ message: { content: 'ok' } }] }), text: () => Promise.resolve('') };
+    };
+    await callLLM([{ role:'user', content:'hi' }]);
+    assertContains(sentBody.model, 'Xortron');
+  });
+});
+
+// ── 15. testConnection (settings stays open) ─────────────────────────────
+describe('testConnection — settings panel stays open', () => {
+  it('settings panel remains open after testConnection', async () => {
+    resetAll();
+    document.getElementById('settings-panel').classList.add('open');
+    okFetch({ choices: [{ message: { content: 'pong' } }] });
+    await testConnection();
+    assert(
+      document.getElementById('settings-panel').classList.contains('open'),
+      'Settings panel should stay open during/after testConnection'
+    );
+  });
+  it('shows success message on connection success', async () => {
+    resetAll();
+    okFetch({ choices: [{ message: { content: 'pong' } }] });
+    await testConnection();
+    assertContains(chatText(), '✓ Connected');
+  });
+  it('shows failure message on connection error', async () => {
+    resetAll();
+    failFetch(500, {});
+    await testConnection();
+    assertContains(chatText(), '✗ Connection failed');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Test runner
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function runAllTests() {
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  btn.textContent = '⟳ Running…';
+
+  const resultsEl = document.getElementById('results');
+  resultsEl.innerHTML = '';
+  document.getElementById('summary').style.display = 'flex';
+
+  let total = 0, passed = 0, failed = 0, skipped = 0;
+
+  for (const suite of suites) {
+    const suiteEl = document.createElement('div');
+    suiteEl.className = 'suite';
+    suiteEl.innerHTML = `<div class="suite-title">${escapeHtml(suite.name)}</div>`;
+    resultsEl.appendChild(suiteEl);
+
+    for (const test of suite.tests) {
+      total++;
+      const testEl = document.createElement('div');
+      testEl.className = 'test';
+
+      if (!test.fn) {
+        skipped++;
+        testEl.innerHTML = `<span class="badge skip">SKIP</span><span class="test-name">${escapeHtml(test.name)}</span>`;
+      } else {
+        try {
+          resetAll();
+          await test.fn();
+          passed++;
+          testEl.innerHTML = `<span class="badge pass">PASS</span><span class="test-name">${escapeHtml(test.name)}</span>`;
+        } catch(e) {
+          failed++;
+          testEl.innerHTML = `
+            <span class="badge fail">FAIL</span>
+            <span class="test-name">
+              ${escapeHtml(test.name)}
+              <div class="test-err">${escapeHtml(e.message)}</div>
+            </span>`;
+        }
+      }
+
+      suiteEl.appendChild(testEl);
+      // Update summary after each test
+      document.getElementById('s-total').textContent = total;
+      document.getElementById('s-pass').textContent  = passed;
+      document.getElementById('s-fail').textContent  = failed;
+      document.getElementById('s-skip').textContent  = skipped;
+      document.getElementById('s-bar').style.width =
+        total > 0 ? `${Math.round(passed / total * 100)}%` : '0%';
+      // Yield to browser to keep UI responsive
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+
+  btn.textContent = failed ? `✗ ${failed} failed — re-run` : `✓ All ${passed} passed — re-run`;
+  btn.disabled = false;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Auto-run on load for convenience
+window.addEventListener('load', runAllTests);
+</script>
+</body>
+</html>

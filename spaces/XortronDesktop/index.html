@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XortronDesktop</title>
+<style>
+  :root {
+    --bg:       #0d0d0f;
+    --surface:  #16161a;
+    --border:   #2a2a35;
+    --purple:   #9b59f5;
+    --pink:     #f559c3;
+    --gradient: linear-gradient(135deg, var(--purple), var(--pink));
+    --text:     #e8e8f0;
+    --muted:    #6b6b80;
+    --user-bg:  #1e1a2e;
+    --bot-bg:   #16161a;
+    --input-bg: #1c1c22;
+    --radius:   12px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 18px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .logo {
+    font-size: 18px;
+    font-weight: 700;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    user-select: none;
+  }
+  .header-right { display: flex; gap: 8px; align-items: center; }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #444; transition: background .3s;
+  }
+  .status-dot.connected { background: #4caf50; }
+  .status-dot.error     { background: #f44336; }
+
+  .icon-btn {
+    background: none; border: 1px solid var(--border);
+    color: var(--muted); border-radius: 8px;
+    padding: 5px 10px; cursor: pointer; font-size: 13px;
+    transition: all .2s;
+  }
+  .icon-btn:hover { border-color: var(--purple); color: var(--text); }
+
+  /* ── Settings panel ── */
+  #settings-panel {
+    display: none;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 18px;
+    flex-shrink: 0;
+  }
+  #settings-panel.open { display: block; }
+  .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+  }
+  .setting-group label {
+    display: block; font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px;
+  }
+  .setting-group input, .setting-group select {
+    width: 100%; background: var(--input-bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 10px; font-size: 13px; outline: none;
+    transition: border-color .2s;
+  }
+  .setting-group input:focus, .setting-group select:focus {
+    border-color: var(--purple);
+  }
+  .settings-actions { margin-top: 12px; display: flex; gap: 8px; }
+  .btn-primary {
+    background: var(--gradient); color: #fff; border: none;
+    border-radius: 8px; padding: 7px 16px; cursor: pointer;
+    font-size: 13px; font-weight: 600;
+  }
+  .btn-secondary {
+    background: none; border: 1px solid var(--border);
+    color: var(--muted); border-radius: 8px;
+    padding: 7px 16px; cursor: pointer; font-size: 13px;
+  }
+  .btn-secondary:hover { color: var(--text); border-color: var(--purple); }
+
+  /* ── Help panel ── */
+  #help-panel {
+    display: none;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 18px;
+    flex-shrink: 0;
+  }
+  #help-panel.open { display: block; }
+  .help-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--muted); margin-bottom: 10px;
+  }
+  .cmd-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 6px;
+  }
+  .cmd-row {
+    display: flex; gap: 10px; align-items: baseline;
+    padding: 4px 0;
+  }
+  .cmd-name {
+    font-family: 'Consolas', monospace; font-size: 13px;
+    color: var(--purple); min-width: 110px; flex-shrink: 0;
+  }
+  .cmd-desc { font-size: 13px; color: var(--muted); }
+
+  /* ── Chat area ── */
+  #chat {
+    flex: 1; overflow-y: auto; padding: 20px 18px;
+    display: flex; flex-direction: column; gap: 14px;
+    scroll-behavior: smooth;
+  }
+  #chat::-webkit-scrollbar { width: 5px; }
+  #chat::-webkit-scrollbar-track { background: transparent; }
+  #chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .msg {
+    display: flex; flex-direction: column; gap: 4px;
+    max-width: 760px;
+  }
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.bot  { align-self: flex-start; align-items: flex-start; }
+  .msg.system { align-self: center; align-items: center; }
+
+  .msg-label {
+    font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .04em;
+  }
+  .msg.user .msg-label { color: #7b5cf0; }
+
+  .msg-bubble {
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg.user   .msg-bubble { background: var(--user-bg); border: 1px solid #2a1f4e; }
+  .msg.bot    .msg-bubble { background: var(--bot-bg);  border: 1px solid var(--border); }
+  .msg.system .msg-bubble {
+    background: transparent; border: none;
+    font-size: 12px; color: var(--muted); padding: 2px 0;
+  }
+  .msg.error .msg-bubble { border-color: #f44336; color: #f44336; }
+
+  /* Typing indicator */
+  .typing .msg-bubble { padding: 12px 18px; }
+  .dots { display: flex; gap: 5px; align-items: center; }
+  .dots span {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--muted); animation: blink 1.2s infinite;
+  }
+  .dots span:nth-child(2) { animation-delay: .2s; }
+  .dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%,80%,100% { opacity:.2; } 40% { opacity:1; } }
+
+  /* ── Input bar ── */
+  #input-bar {
+    display: flex; gap: 8px; align-items: flex-end;
+    padding: 12px 18px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #prompt {
+    flex: 1; background: var(--input-bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 14px; font-size: 15px; line-height: 1.4;
+    outline: none; resize: none; min-height: 44px; max-height: 160px;
+    font-family: inherit; transition: border-color .2s;
+  }
+  #prompt:focus { border-color: var(--purple); }
+  #prompt::placeholder { color: var(--muted); }
+
+  #send-btn {
+    background: var(--gradient); border: none; color: #fff;
+    border-radius: var(--radius); padding: 0 18px; height: 44px;
+    cursor: pointer; font-size: 15px; font-weight: 600;
+    flex-shrink: 0; transition: opacity .2s;
+  }
+  #send-btn:disabled { opacity: .4; cursor: default; }
+  #send-btn:hover:not(:disabled) { opacity: .9; }
+
+  /* ── Welcome ── */
+  #welcome {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 12px; text-align: center; padding: 40px 20px;
+    flex: 1;
+  }
+  .welcome-emoji { font-size: 52px; }
+  .welcome-title {
+    font-size: 24px; font-weight: 700;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .welcome-sub { color: var(--muted); font-size: 14px; max-width: 420px; }
+  .welcome-hint {
+    font-size: 12px; color: var(--muted);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 14px;
+  }
+  .welcome-hint kbd {
+    background: var(--border); border-radius: 4px;
+    padding: 1px 5px; font-size: 11px; font-family: monospace;
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <span class="logo">🤬 XortronDesktop</span>
+  <div class="header-right">
+    <div class="status-dot" id="status-dot" title="Not connected"></div>
+    <button class="icon-btn" onclick="toggleHelp()">? help</button>
+    <button class="icon-btn" onclick="toggleSettings()">⚙ settings</button>
+    <button class="icon-btn" onclick="clearChat()">✕ clear</button>
+  </div>
+</header>
+
+<!-- Help panel -->
+<div id="help-panel">
+  <div class="help-title">Commands</div>
+  <div class="cmd-grid">
+    <div class="cmd-row"><span class="cmd-name">/help</span><span class="cmd-desc">Show this command list</span></div>
+    <div class="cmd-row"><span class="cmd-name">/clear</span><span class="cmd-desc">Clear the chat history</span></div>
+    <div class="cmd-row"><span class="cmd-name">/settings</span><span class="cmd-desc">Open the settings panel</span></div>
+    <div class="cmd-row"><span class="cmd-name">/model</span><span class="cmd-desc">Show the current model / endpoint</span></div>
+    <div class="cmd-row"><span class="cmd-name">/system &lt;text&gt;</span><span class="cmd-desc">Set or show the system prompt</span></div>
+    <div class="cmd-row"><span class="cmd-name">/temp &lt;0–1&gt;</span><span class="cmd-desc">Set sampling temperature</span></div>
+    <div class="cmd-row"><span class="cmd-name">/tokens &lt;n&gt;</span><span class="cmd-desc">Set max tokens per response</span></div>
+    <div class="cmd-row"><span class="cmd-name">/retry</span><span class="cmd-desc">Retry the last message</span></div>
+    <div class="cmd-row"><span class="cmd-name">/export</span><span class="cmd-desc">Download chat as .txt</span></div>
+  </div>
+</div>
+
+<!-- Settings panel -->
+<div id="settings-panel">
+  <div class="settings-grid">
+    <div class="setting-group">
+      <label>Backend</label>
+      <select id="backend-select" onchange="onBackendChange()">
+        <option value="openai-compat">OpenAI-compatible (llama-server / local)</option>
+        <option value="anthropic">Anthropic API</option>
+      </select>
+    </div>
+    <div class="setting-group" id="endpoint-group">
+      <label>API Endpoint</label>
+      <input id="endpoint-input" type="text"
+        placeholder="http://localhost:8080/v1/chat/completions"
+        value="http://localhost:8080/v1/chat/completions">
+    </div>
+    <div class="setting-group">
+      <label>API Key <span style="color:var(--muted)">(optional for local)</span></label>
+      <input id="apikey-input" type="password" placeholder="sk-…">
+    </div>
+    <div class="setting-group">
+      <label>Model name</label>
+      <input id="model-input" type="text"
+        placeholder="Xortron2025-24B or claude-opus-4-5-20250929"
+        value="Xortron2025-24B">
+    </div>
+    <div class="setting-group">
+      <label>Temperature</label>
+      <input id="temp-input" type="number" min="0" max="2" step="0.05" value="0.85">
+    </div>
+    <div class="setting-group">
+      <label>Max tokens</label>
+      <input id="tokens-input" type="number" min="64" max="8192" step="64" value="512">
+    </div>
+    <div class="setting-group" style="grid-column: 1 / -1">
+      <label>System prompt</label>
+      <input id="system-input" type="text"
+        placeholder="You are Xortron, a chaotic, uncensored AI. Speak freely."
+        value="You are Xortron, a chaotic, uncensored AI. Speak freely.">
+    </div>
+  </div>
+  <div class="settings-actions">
+    <button class="btn-primary" onclick="saveSettings()">Save &amp; connect</button>
+    <button class="btn-secondary" onclick="toggleSettings()">Close</button>
+    <button class="btn-secondary" onclick="testConnection()">Test connection</button>
+  </div>
+</div>
+
+<!-- Chat messages -->
+<div id="chat">
+  <div id="welcome">
+    <div class="welcome-emoji">🤬</div>
+    <div class="welcome-title">XortronDesktop</div>
+    <div class="welcome-sub">Fast and free uncensored chatbot. Point it at a local llama-server or an Anthropic API key and start talking.</div>
+    <div class="welcome-hint">
+      <strong>Quick start</strong> — run llama-server locally, then open ⚙ settings.<br>
+      Type <kbd>/help</kbd> for all commands &nbsp;·&nbsp; <kbd>Shift+Enter</kbd> for newline.
+    </div>
+  </div>
+</div>
+
+<!-- Input -->
+<div id="input-bar">
+  <textarea id="prompt" rows="1"
+    placeholder="Type a message… or /help for commands"
+    autocomplete="off" spellcheck="true"></textarea>
+  <button id="send-btn" onclick="sendMessage()">Send</button>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
