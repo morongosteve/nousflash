@@ -208,6 +208,8 @@ class PipelineRunner:
             auth=auth,
             private_key_hex=private_key_hex,
             eth_mainnet_rpc_url=os.getenv("ETH_MAINNET_RPC_URL"),
+            base_rpc_url=os.getenv("BASE_RPC_URL", ""),
+            zora_api_key=os.getenv("ZORA_API_KEY", ""),
             **api_keys
         )
 

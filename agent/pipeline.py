@@ -8,7 +8,7 @@ from random import random
 from sqlalchemy.orm import Session
 
 from db.db_setup import get_db
-from models import Post, User, TweetPost
+from models import Post, User, TweetPost, CreatedCoin
 from twitter.account import Account
 
 from engines.post_retriever import (
@@ -24,6 +24,7 @@ from engines.significance_scorer import score_significance, score_reply_signific
 from engines.post_sender import send_post, send_post_API
 from engines.wallet_send import transfer_eth, wallet_address_in_post, get_wallet_balance
 from engines.follow_user import follow_by_username, decide_to_follow_users
+from engines.coin_creator import create_coin, coin_creation_decision
 
 @dataclass
 class Config:
@@ -42,6 +43,9 @@ class Config:
     min_reply_worthiness_score: float = 3.0
     min_follow_score: float = 0.75
     min_eth_balance: float = 0.3
+    base_rpc_url: str = ""
+    zora_api_key: str = ""
+    coin_creation_probability: float = 0.1  # 10% chance per pipeline run
     bot_username: str = "tee_hee_he"
     bot_email: str = "tee_hee_he@example.com"
 
@@ -187,6 +191,84 @@ class PostingPipeline:
             except Exception as e:
                 print(f"Error handling reply: {e}")
 
+    def _handle_coin_creation(self, notif_context: List[str], short_term_memory: str) -> None:
+        """Evaluate and execute coin creation based on LLM decision."""
+        if not self.config.base_rpc_url:
+            return
+
+        # Probabilistic gate to avoid creating coins too often
+        if random() > self.config.coin_creation_probability:
+            return
+
+        for _ in range(2):  # Max 2 attempts
+            try:
+                decision_data = coin_creation_decision(
+                    notif_context,
+                    short_term_memory,
+                    self.config.llm_api_key,
+                )
+                decision = json.loads(decision_data)
+
+                if not decision or not decision.get("name"):
+                    print("LLM decided not to create a coin this round.")
+                    break
+
+                coin_name = decision["name"]
+                coin_symbol = decision["symbol"]
+                coin_description = decision.get("description", "")
+
+                # Build a simple metadata URI using a data URI with JSON
+                metadata = json.dumps({
+                    "name": coin_name,
+                    "symbol": coin_symbol,
+                    "description": coin_description,
+                })
+                metadata_uri = f"data:application/json;base64,{__import__('base64').b64encode(metadata.encode()).decode()}"
+
+                print(f"Creating coin: {coin_name} ({coin_symbol})")
+                result = create_coin(
+                    private_key=self.config.private_key_hex,
+                    base_rpc_url=self.config.base_rpc_url,
+                    name=coin_name,
+                    symbol=coin_symbol,
+                    metadata_uri=metadata_uri,
+                    currency_type="ETH",
+                    zora_api_key=self.config.zora_api_key or None,
+                )
+
+                if isinstance(result, dict):
+                    coin_record = CreatedCoin(
+                        name=coin_name,
+                        symbol=coin_symbol,
+                        description=coin_description,
+                        coin_address=result.get("coin_address"),
+                        tx_hash=result["tx_hash"],
+                        metadata_uri=metadata_uri,
+                    )
+                    self.config.db.add(coin_record)
+                    self.config.db.commit()
+
+                    # Announce coin creation via tweet
+                    announcement = f"just birthed ${coin_symbol} into existence. {coin_description}"
+                    if result.get("coin_address"):
+                        announcement += f"\n\nhttps://zora.co/coin/base:{result['coin_address']}"
+
+                    tweet_id = self._post_content(announcement)
+                    if tweet_id:
+                        coin_record.tweet_id = tweet_id
+                        self.config.db.commit()
+                        print(f"Announced coin creation: {announcement}")
+                else:
+                    print(f"Coin creation failed: {result}")
+
+                break
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f"Error processing coin creation decision: {e}")
+                continue
+            except Exception as e:
+                print(f"Error during coin creation: {e}")
+                break
+
     def _post_content(self, content: str) -> Optional[str]:
         """Attempt to post content using available methods."""
         # Try API method first
@@ -260,6 +342,10 @@ class PostingPipeline:
             short_term_embedding
         )
         print(f"Long-term memories: {long_term_memories}")
+
+        # Evaluate coin creation
+        self._handle_coin_creation(notif_context, short_term_memory)
+        time.sleep(5)
 
         # Generate and evaluate new post
         new_post_content = generate_post(
