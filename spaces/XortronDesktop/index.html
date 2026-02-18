@@ -238,6 +238,48 @@
     background: var(--border); border-radius: 4px;
     padding: 1px 5px; font-size: 11px; font-family: monospace;
   }
+
+  /* ── Stream toggle ── */
+  .toggle-row {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .toggle-label { font-size: 13px; color: var(--text); }
+  .toggle {
+    position: relative; width: 36px; height: 20px; flex-shrink: 0;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0; background: var(--border);
+    border-radius: 20px; cursor: pointer; transition: background .2s;
+  }
+  .slider::before {
+    content: ''; position: absolute; width: 14px; height: 14px;
+    left: 3px; top: 3px; background: #fff; border-radius: 50%;
+    transition: transform .2s;
+  }
+  .toggle input:checked + .slider { background: var(--purple); }
+  .toggle input:checked + .slider::before { transform: translateX(16px); }
+
+  /* ── Code result block ── */
+  .code-result { font-size: 13px; padding: 10px 12px !important; }
+  .code-result-header {
+    font-family: 'Consolas', monospace; font-size: 12px; margin-bottom: 6px;
+  }
+  .code-result-header.ok  { color: #4caf50; }
+  .code-result-header.err { color: #f44336; }
+  pre.code-out {
+    background: #0a0a0d; border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px; font-size: 12px;
+    font-family: 'Consolas', monospace; overflow-x: auto;
+    white-space: pre-wrap; word-break: break-all;
+    color: var(--text); margin-bottom: 4px;
+  }
+  pre.code-err {
+    background: rgba(244,67,54,.08); border: 1px solid rgba(244,67,54,.25);
+    border-radius: 6px; padding: 8px 10px; font-size: 12px;
+    font-family: 'Consolas', monospace; overflow-x: auto;
+    white-space: pre-wrap; word-break: break-all; color: #f44336;
+  }
 </style>
 </head>
 <body>
@@ -266,6 +308,7 @@
     <div class="cmd-row"><span class="cmd-name">/tokens &lt;n&gt;</span><span class="cmd-desc">Set max tokens per response</span></div>
     <div class="cmd-row"><span class="cmd-name">/retry</span><span class="cmd-desc">Retry the last message</span></div>
     <div class="cmd-row"><span class="cmd-name">/export</span><span class="cmd-desc">Download chat as .txt</span></div>
+    <div class="cmd-row"><span class="cmd-name">/run &lt;code&gt;</span><span class="cmd-desc">Execute Python on the local code server</span></div>
   </div>
 </div>
 
@@ -308,6 +351,22 @@
       <input id="system-input" type="text"
         placeholder="You are Xortron, a chaotic, uncensored AI. Speak freely."
         value="You are Xortron, a chaotic, uncensored AI. Speak freely.">
+    </div>
+    <div class="setting-group">
+      <label>Code server endpoint <span style="color:var(--muted)">(for /run)</span></label>
+      <input id="code-endpoint-input" type="text"
+        placeholder="http://localhost:8081/execute"
+        value="http://localhost:8081/execute">
+    </div>
+    <div class="setting-group">
+      <label>Streaming</label>
+      <div class="toggle-row" style="padding:4px 0">
+        <label class="toggle">
+          <input id="stream-toggle" type="checkbox" checked>
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label">Stream tokens as they arrive</span>
+      </div>
     </div>
   </div>
   <div class="settings-actions">

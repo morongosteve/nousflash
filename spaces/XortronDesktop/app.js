@@ -35,13 +35,15 @@ let chatEl, promptEl, sendBtn, statusDot, welcomeEl;
   welcomeEl = document.getElementById('welcome');
 
   const c = state.config;
-  if (c.backend)           document.getElementById('backend-select').value = c.backend;
-  if (c.endpoint)          document.getElementById('endpoint-input').value  = c.endpoint;
-  if (c.apiKey)            document.getElementById('apikey-input').value    = c.apiKey;
-  if (c.model)             document.getElementById('model-input').value     = c.model;
-  if (c.temperature != null) document.getElementById('temp-input').value   = c.temperature;
-  if (c.maxTokens)         document.getElementById('tokens-input').value    = c.maxTokens;
-  if (c.systemPrompt)      document.getElementById('system-input').value    = c.systemPrompt;
+  if (c.backend)           document.getElementById('backend-select').value    = c.backend;
+  if (c.endpoint)          document.getElementById('endpoint-input').value    = c.endpoint;
+  if (c.apiKey)            document.getElementById('apikey-input').value      = c.apiKey;
+  if (c.model)             document.getElementById('model-input').value       = c.model;
+  if (c.temperature != null) document.getElementById('temp-input').value     = c.temperature;
+  if (c.maxTokens)         document.getElementById('tokens-input').value      = c.maxTokens;
+  if (c.systemPrompt)      document.getElementById('system-input').value      = c.systemPrompt;
+  if (c.codeEndpoint)      document.getElementById('code-endpoint-input').value = c.codeEndpoint;
+  if (c.stream != null)    document.getElementById('stream-toggle').checked   = c.stream;
   onBackendChange();
 
   promptEl.addEventListener('keydown', e => {
@@ -82,13 +84,15 @@ function onBackendChange() {
 // ── Settings ────────────────────────────────────────────────────────────────
 function _readSettingsFromDOM() {
   return {
-    backend:      document.getElementById('backend-select').value,
-    endpoint:     document.getElementById('endpoint-input').value.trim(),
-    apiKey:       document.getElementById('apikey-input').value.trim(),
-    model:        document.getElementById('model-input').value.trim(),
-    temperature:  parseFloat(document.getElementById('temp-input').value),
-    maxTokens:    parseInt(document.getElementById('tokens-input').value, 10),
-    systemPrompt: document.getElementById('system-input').value.trim(),
+    backend:       document.getElementById('backend-select').value,
+    endpoint:      document.getElementById('endpoint-input').value.trim(),
+    apiKey:        document.getElementById('apikey-input').value.trim(),
+    model:         document.getElementById('model-input').value.trim(),
+    temperature:   parseFloat(document.getElementById('temp-input').value),
+    maxTokens:     parseInt(document.getElementById('tokens-input').value, 10),
+    systemPrompt:  document.getElementById('system-input').value.trim(),
+    codeEndpoint:  document.getElementById('code-endpoint-input').value.trim(),
+    stream:        document.getElementById('stream-toggle').checked,
   };
 }
 
@@ -245,6 +249,15 @@ function handleCommand(text) {
       return true;
     case '/export':
       exportChat(); return true;
+    case '/run': {
+      if (!arg) {
+        addSystemMsg('/run <python code> — executes code on the local code server.\nExample: /run print(2**32)');
+        return true;
+      }
+      addSystemMsg(`Running: ${arg.slice(0, 80)}${arg.length > 80 ? '…' : ''}`);
+      runCode(arg);
+      return true;
+    }
     default:
       return false;
   }
@@ -295,22 +308,57 @@ async function sendMessage() {
   await runInference();
 }
 
-// FIX: removed unused `userText` parameter — state.messages is the source of truth
 async function runInference() {
   if (state.busy) return;
-  state.busy        = true;
-  sendBtn.disabled  = true;
-  addTypingIndicator();
+  state.busy       = true;
+  sendBtn.disabled = true;
   setStatus('connected');
 
+  const useStream = state.config.stream !== false; // default on
+  const backend   = state.config.backend || 'openai-compat';
+
+  // For streaming: replace typing indicator with a live bot bubble
+  let botBubble = null;
+  let accumulated = '';
+
+  function onToken(token) {
+    accumulated += token;
+    if (!botBubble) {
+      removeTypingIndicator();
+      hideWelcome();
+      botBubble = document.createElement('div');
+      botBubble.className = 'msg bot';
+      botBubble.innerHTML = `<span class="msg-label">xortron</span><div class="msg-bubble"></div>`;
+      chatEl.appendChild(botBubble);
+    }
+    botBubble.querySelector('.msg-bubble').textContent = accumulated;
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  addTypingIndicator();
+
   try {
-    const reply = await callLLM(state.messages);
-    removeTypingIndicator();
-    state.messages.push({ role: 'assistant', content: reply });
-    addMsg('assistant', reply);
+    if (useStream) {
+      if (backend === 'anthropic') {
+        await streamAnthropic(state.messages, onToken);
+      } else {
+        await streamOpenAICompat(state.messages, onToken);
+      }
+      // Streaming done — persist to state
+      if (accumulated) {
+        state.messages.push({ role: 'assistant', content: accumulated });
+      }
+    } else {
+      // Non-streaming fallback
+      const reply = await callLLM(state.messages);
+      removeTypingIndicator();
+      state.messages.push({ role: 'assistant', content: reply });
+      addMsg('assistant', reply);
+    }
     setStatus('connected');
   } catch(e) {
     removeTypingIndicator();
+    if (botBubble) botBubble.remove();
     setStatus('error');
     const errDiv = addMsg('assistant', `Error: ${e.message}\n\nCheck ⚙ settings — is the server running?`);
     errDiv.classList.add('error');
@@ -321,7 +369,120 @@ async function runInference() {
   }
 }
 
-// ── LLM API routing ──────────────────────────────────────────────────────────
+// ── SSE streaming helpers ─────────────────────────────────────────────────────
+
+async function streamOpenAICompat(messages, onToken) {
+  const cfg          = state.config;
+  const apiKey       = cfg.apiKey || '';
+  const model        = cfg.model  || 'Xortron2025-24B';
+  const temperature  = cfg.temperature ?? 0.85;
+  const maxTokens    = cfg.maxTokens || 512;
+  const systemPrompt = cfg.systemPrompt || 'You are Xortron, a chaotic, uncensored AI. Speak freely.';
+  const endpoint     = cfg.endpoint || 'http://localhost:8080/v1/chat/completions';
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+  const resp = await fetch(endpoint, {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      model,
+      messages:   [{ role: 'system', content: systemPrompt }, ...messages],
+      temperature, max_tokens: maxTokens,
+      stream: true,
+    }),
+  });
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+  }
+
+  const reader  = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let   buf     = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+
+    // SSE lines: "data: {...}\n"
+    const lines = buf.split('\n');
+    buf = lines.pop(); // keep incomplete line in buffer
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const payload = trimmed.slice(5).trim();
+      if (payload === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(payload);
+        const token  = parsed?.choices?.[0]?.delta?.content;
+        if (token) onToken(token);
+      } catch { /* skip malformed chunk */ }
+    }
+  }
+}
+
+async function streamAnthropic(messages, onToken) {
+  const cfg          = state.config;
+  const apiKey       = cfg.apiKey || '';
+  const model        = cfg.model  || 'claude-opus-4-5-20250929';
+  const safeTemp     = Math.min(cfg.temperature ?? 0.85, 1.0);
+  const maxTokens    = cfg.maxTokens || 512;
+  const systemPrompt = cfg.systemPrompt || 'You are Xortron, a chaotic, uncensored AI. Speak freely.';
+
+  if (!apiKey) throw new Error('Anthropic API key is required. Set it in ⚙ settings.');
+
+  const filtered = messages.filter(m => m.role === 'user' || m.role === 'assistant');
+
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'x-api-key':     apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-calls': 'true',
+    },
+    body: JSON.stringify({
+      model, system: systemPrompt, messages: filtered,
+      max_tokens: maxTokens, temperature: safeTemp,
+      stream: true,
+    }),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data?.error?.message || `HTTP ${resp.status}`);
+  }
+
+  const reader  = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let   buf     = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+
+    const lines = buf.split('\n');
+    buf = lines.pop();
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const payload = trimmed.slice(5).trim();
+      try {
+        const parsed = JSON.parse(payload);
+        // Anthropic events: content_block_delta with delta.type === 'text_delta'
+        if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+          onToken(parsed.delta.text);
+        }
+      } catch { /* skip */ }
+    }
+  }
+}
+
+// ── Non-streaming fallback (used by testConnection + stream:false) ────────────
 async function callLLM(messages, maxTokensOverride) {
   const cfg          = state.config;
   const backend      = cfg.backend || 'openai-compat';
@@ -344,11 +505,8 @@ async function callOpenAICompat(messages, model, apiKey, temperature, maxTokens,
   const body = {
     model,
     messages: [{ role: 'system', content: systemPrompt }, ...messages],
-    temperature,
-    max_tokens: maxTokens,
-    stream:     false,
+    temperature, max_tokens: maxTokens, stream: false,
   };
-
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
@@ -365,30 +523,18 @@ async function callOpenAICompat(messages, model, apiKey, temperature, maxTokens,
 
 async function callAnthropic(messages, model, apiKey, temperature, maxTokens, systemPrompt) {
   if (!apiKey) throw new Error('Anthropic API key is required. Set it in ⚙ settings.');
-
-  // FIX: Anthropic max temperature is 1.0 — clamp silently rather than erroring
   const safeTemp = Math.min(temperature, 1.0);
-
-  // Anthropic requires strict user/assistant alternation
   const filtered = messages.filter(m => m.role === 'user' || m.role === 'assistant');
 
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method:  'POST',
+    method: 'POST',
     headers: {
-      'Content-Type':                          'application/json',
-      'x-api-key':                             apiKey,
-      'anthropic-version':                     '2023-06-01',
+      'Content-Type': 'application/json', 'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-calls': 'true',
     },
-    body: JSON.stringify({
-      model,
-      system:     systemPrompt,
-      messages:   filtered,
-      max_tokens: maxTokens,
-      temperature: safeTemp,
-    }),
+    body: JSON.stringify({ model, system: systemPrompt, messages: filtered, max_tokens: maxTokens, temperature: safeTemp }),
   });
-
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}));
     throw new Error(data?.error?.message || `HTTP ${resp.status}`);
@@ -397,4 +543,48 @@ async function callAnthropic(messages, model, apiKey, temperature, maxTokens, sy
   const content = data?.content?.[0]?.text;
   if (!content) throw new Error('Empty response from Anthropic');
   return content;
+}
+
+// ── Code execution via local HTTP endpoint ────────────────────────────────────
+async function runCode(code) {
+  const endpoint = state.config.codeEndpoint || 'http://localhost:8081/execute';
+  let result;
+  try {
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    result = await resp.json();
+  } catch(e) {
+    addCodeResultMsg({ error: `Cannot reach code server at ${endpoint}: ${e.message}` });
+    return;
+  }
+  addCodeResultMsg(result);
+}
+
+function addCodeResultMsg(result) {
+  hideWelcome();
+  const div = document.createElement('div');
+  div.className = 'msg system';
+
+  const stdout  = result.stdout  || '';
+  const stderr  = result.stderr  || '';
+  const errMsg  = result.error   || '';
+  const code    = result.exit_code;
+  const elapsed = result.elapsed_s != null ? ` (${result.elapsed_s}s)` : '';
+  const ok      = code === 0 && !errMsg;
+
+  const icon    = ok ? '✓' : '✗';
+  const label   = ok ? `exit 0${elapsed}` : (errMsg || `exit ${code}${elapsed}`);
+
+  let html = `<div class="msg-bubble code-result">
+    <div class="code-result-header ${ok ? 'ok' : 'err'}">${escHtml(icon)} ${escHtml(label)}</div>`;
+  if (stdout) html += `<pre class="code-out">${escHtml(stdout)}</pre>`;
+  if (stderr) html += `<pre class="code-err">${escHtml(stderr)}</pre>`;
+  html += `</div>`;
+
+  div.innerHTML = html;
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
 }
