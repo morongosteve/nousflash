@@ -59,7 +59,7 @@ def _call_memory(
         except ImportError:
             raise RuntimeError("anthropic package not installed; run: pip install anthropic")
 
-        client = anthropic_sdk.Anthropic(api_key=anthropic_api_key)
+        client = anthropic_sdk.Anthropic(api_key=anthropic_api_key, timeout=60.0)
         response = client.messages.create(
             model="claude-3-5-haiku-20241022",  # Fast model for internal memory pass
             max_tokens=512,
@@ -91,6 +91,7 @@ def _call_memory(
             "top_k": 40,
             "stream": False,
         },
+        timeout=30,
     )
     if resp.status_code != 200:
         raise RuntimeError(f"Hyperbolic short-term memory HTTP {resp.status_code}: {resp.text}")

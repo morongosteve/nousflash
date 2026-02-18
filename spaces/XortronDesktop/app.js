@@ -8,11 +8,23 @@ const state = {
 
 function loadConfig() {
   try {
-    return JSON.parse(localStorage.getItem('xortron_cfg') || '{}');
+    const cfg = JSON.parse(localStorage.getItem('xortron_cfg') || '{}');
+    // Restore API key from session-only storage (never persisted to localStorage)
+    cfg.apiKey = _loadApiKey();
+    return cfg;
   } catch { return {}; }
 }
 function saveConfig() {
-  localStorage.setItem('xortron_cfg', JSON.stringify(state.config));
+  // Persist settings but keep the API key in sessionStorage only (cleared on tab close)
+  const { apiKey, ...persistable } = state.config;
+  localStorage.setItem('xortron_cfg', JSON.stringify(persistable));
+  if (apiKey) sessionStorage.setItem('xortron_apikey', apiKey);
+  else        sessionStorage.removeItem('xortron_apikey');
+}
+
+// _loadApiKey must be defined before loadConfig() runs (called at parse time above)
+function _loadApiKey() {
+  return sessionStorage.getItem('xortron_apikey') || '';
 }
 
 // Exposed for test harness — resets runtime state without touching localStorage

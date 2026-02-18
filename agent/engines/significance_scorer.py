@@ -15,7 +15,7 @@ def _call_scorer(prompt: str, llm_api_key: str, inference_mode: str, anthropic_a
         except ImportError:
             raise RuntimeError("anthropic package not installed; run: pip install anthropic")
 
-        client = anthropic_sdk.Anthropic(api_key=anthropic_api_key)
+        client = anthropic_sdk.Anthropic(api_key=anthropic_api_key, timeout=60.0)
         response = client.messages.create(
             model="claude-3-5-haiku-20241022",  # Fast/cheap model for scoring
             max_tokens=16,
@@ -42,6 +42,7 @@ def _call_scorer(prompt: str, llm_api_key: str, inference_mode: str, anthropic_a
             "top_p": 0.95,
             "top_k": 40,
         },
+        timeout=30,
     )
     if resp.status_code != 200:
         raise RuntimeError(f"Hyperbolic scorer HTTP {resp.status_code}: {resp.text}")

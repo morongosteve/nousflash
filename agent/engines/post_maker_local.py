@@ -111,7 +111,7 @@ def _generate_with_anthropic(prompt: str, api_key: str) -> str:
     """
     print("Using Anthropic Claude inference...")
 
-    client = anthropic_sdk.Anthropic(api_key=api_key)
+    client = anthropic_sdk.Anthropic(api_key=api_key, timeout=60.0)
 
     # --- Read all parameters from env (with safe defaults) ---
     model = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-5-20250929")

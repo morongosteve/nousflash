@@ -77,10 +77,10 @@ DROPLET_IP=$(doctl compute droplet get "$DROPLET_ID" --no-header --format Public
 echo ">>> IP: $DROPLET_IP"
 
 echo ">>> Uploading .env..."
-scp -o StrictHostKeyChecking=no ../agent/.env "root@$DROPLET_IP:/tmp/.env"
+scp -o StrictHostKeyChecking=accept-new ../agent/.env "root@$DROPLET_IP:/tmp/.env"
 
 echo ">>> Bootstrapping..."
-ssh -o StrictHostKeyChecking=no "root@$DROPLET_IP" bash -s << REMOTE
+ssh -o StrictHostKeyChecking=accept-new "root@$DROPLET_IP" bash -s << REMOTE
 set -euo pipefail
 apt-get update -qq
 apt-get install -y -qq curl git
@@ -92,6 +92,7 @@ systemctl enable --now docker
 # Clone repo
 git clone --branch main $REPO_URL /opt/nousflash
 cp /tmp/.env /opt/nousflash/agent/.env
+rm -f /tmp/.env
 
 if [ "$WITH_LOCAL_INFERENCE" = "true" ]; then
   echo "Downloading Xortron2025 model (~19.3 GB)..."

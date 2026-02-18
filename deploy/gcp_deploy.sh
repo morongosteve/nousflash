@@ -120,6 +120,7 @@ cd /opt/nousflash
 
 echo "--- Moving .env into place ---"
 sudo cp /tmp/.env agent/.env
+sudo rm -f /tmp/.env
 
 echo "--- Downloading Xortron2025 model (if local inference mode) ---"
 if [ "$WITH_LOCAL_INFERENCE" = "true" ]; then
