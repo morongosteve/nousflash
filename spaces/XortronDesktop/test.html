@@ -39,7 +39,7 @@
 <body>
 
 <h1>🤬 XortronDesktop — Test Suite</h1>
-<p class="subtitle">Covers every feature: config, panels, settings, commands, rendering, API routing, status, export.</p>
+<p class="subtitle">18 suites: config, panels, settings, commands, rendering, API routing, status, export, streaming, code execution.</p>
 
 <button id="run-btn" onclick="runAllTests()">▶ Run All Tests</button>
 
@@ -1081,6 +1081,320 @@ describe('testConnection — settings panel stays open', () => {
     failFetch(500, {});
     await testConnection();
     assertContains(chatText(), '✗ Connection failed');
+  });
+});
+
+// ── 16. Streaming — SSE parsing ──────────────────────────────────────────
+describe('Streaming — SSE token parsing', () => {
+  // Helper: create a mock Response with ReadableStream body emitting SSE chunks
+  function mockStreamResponse(chunks, status = 200) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(encoder.encode(chunk));
+          await new Promise(r => setTimeout(r, 1)); // tiny tick
+        }
+        controller.close();
+      }
+    });
+    return {
+      ok: status === 200,
+      status,
+      body: stream,
+      json: () => Promise.resolve({}),
+      text: () => Promise.resolve(''),
+    };
+  }
+
+  it('streamOpenAICompat parses delta.content tokens', async () => {
+    resetAll();
+    state.config = { endpoint: 'http://test', model: 'm', temperature: 0.85, maxTokens: 50, systemPrompt: 's' };
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"Hello"}}]}\n',
+      'data: {"choices":[{"delta":{"content":" world"}}]}\n',
+      'data: [DONE]\n',
+    ];
+    window.fetch = () => Promise.resolve(mockStreamResponse(chunks));
+
+    let accumulated = '';
+    await streamOpenAICompat([{ role:'user', content:'hi' }], token => { accumulated += token; });
+    assertEqual(accumulated, 'Hello world');
+  });
+
+  it('streamOpenAICompat ignores malformed chunks', async () => {
+    resetAll();
+    state.config = { endpoint: 'http://test', model: 'm', temperature: 0.85, maxTokens: 50, systemPrompt: 's' };
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"OK"}}]}\n',
+      'data: {invalid json\n',  // malformed
+      'data: {"choices":[{"delta":{"content":"!"}}]}\n',
+      'data: [DONE]\n',
+    ];
+    window.fetch = () => Promise.resolve(mockStreamResponse(chunks));
+
+    let accumulated = '';
+    await streamOpenAICompat([{ role:'user', content:'hi' }], token => { accumulated += token; });
+    assertEqual(accumulated, 'OK!');
+  });
+
+  it('streamAnthropic parses content_block_delta text_delta', async () => {
+    resetAll();
+    state.config = { backend:'anthropic', apiKey:'sk-test', model:'claude', temperature:0.5, maxTokens:50, systemPrompt:'s' };
+    const chunks = [
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Ant"}}\n',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hropic"}}\n',
+      'data: {"type":"message_stop"}\n',
+    ];
+    window.fetch = () => Promise.resolve(mockStreamResponse(chunks));
+
+    let accumulated = '';
+    await streamAnthropic([{ role:'user', content:'hi' }], token => { accumulated += token; });
+    assertEqual(accumulated, 'Anthropic');
+  });
+
+  it('streamAnthropic skips non-delta events', async () => {
+    resetAll();
+    state.config = { backend:'anthropic', apiKey:'sk-test', model:'claude', temperature:0.5, maxTokens:50, systemPrompt:'s' };
+    const chunks = [
+      'data: {"type":"message_start","message":{"id":"msg_123"}}\n',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"OK"}}\n',
+      'data: {"type":"content_block_stop","index":0}\n',
+    ];
+    window.fetch = () => Promise.resolve(mockStreamResponse(chunks));
+
+    let accumulated = '';
+    await streamAnthropic([{ role:'user', content:'hi' }], token => { accumulated += token; });
+    assertEqual(accumulated, 'OK');
+  });
+
+  it('streamOpenAICompat throws on HTTP error', async () => {
+    resetAll();
+    state.config = { endpoint: 'http://test', model: 'm', temperature: 0.85, maxTokens: 50, systemPrompt: 's' };
+    window.fetch = () => Promise.resolve({
+      ok: false, status: 500,
+      text: () => Promise.resolve('Server error'),
+      json: () => Promise.resolve({}),
+    });
+    await assertRejects(
+      () => streamOpenAICompat([{ role:'user', content:'hi' }], () => {}),
+      'HTTP 500'
+    );
+  });
+
+  it('streamAnthropic throws on HTTP error', async () => {
+    resetAll();
+    state.config = { backend:'anthropic', apiKey:'sk-test', model:'claude', temperature:0.5, maxTokens:50, systemPrompt:'s' };
+    window.fetch = () => Promise.resolve({
+      ok: false, status: 401,
+      json: () => Promise.resolve({ error: { message: 'Invalid API key' } }),
+      text: () => Promise.resolve(''),
+    });
+    await assertRejects(
+      () => streamAnthropic([{ role:'user', content:'hi' }], () => {}),
+      'Invalid API key'
+    );
+  });
+});
+
+// ── 17. Code execution — /run command ────────────────────────────────────
+describe('Code execution — /run command', () => {
+  it('/run with no arg shows help', () => {
+    resetAll();
+    handleCommand('/run');
+    assertContains(chatText(), '/run <python code>');
+    assertContains(chatText(), 'executes code');
+  });
+
+  it('/run calls runCode() with the arg', async () => {
+    resetAll();
+    let calledWith = null;
+    window.runCode = code => { calledWith = code; };  // spy
+    handleCommand('/run print(123)');
+    assertEqual(calledWith, 'print(123)');
+  });
+
+  it('runCode POSTs to codeEndpoint', async () => {
+    resetAll();
+    state.config.codeEndpoint = 'http://localhost:8081/execute';
+    let sentBody;
+    window.fetch = async (url, opts) => {
+      sentBody = JSON.parse(opts.body);
+      return { json: () => Promise.resolve({ stdout: 'ok', stderr: '', exit_code: 0 }) };
+    };
+    await runCode('print("hi")');
+    assertEqual(sentBody.code, 'print("hi")');
+  });
+
+  it('runCode defaults endpoint to localhost:8081/execute', async () => {
+    resetAll();
+    state.config = {}; // no codeEndpoint set
+    let calledUrl;
+    window.fetch = async (url, opts) => {
+      calledUrl = url;
+      return { json: () => Promise.resolve({ stdout: '', stderr: '', exit_code: 0 }) };
+    };
+    await runCode('pass');
+    assertEqual(calledUrl, 'http://localhost:8081/execute');
+  });
+
+  it('addCodeResultMsg renders stdout in .code-out', () => {
+    resetAll();
+    addCodeResultMsg({ stdout: 'output text', stderr: '', exit_code: 0, elapsed_s: 0.5 });
+    const pre = document.querySelector('pre.code-out');
+    assert(pre, 'no pre.code-out found');
+    assertContains(pre.textContent, 'output text');
+  });
+
+  it('addCodeResultMsg renders stderr in .code-err', () => {
+    resetAll();
+    addCodeResultMsg({ stdout: '', stderr: 'error message', exit_code: 1, elapsed_s: 0.2 });
+    const pre = document.querySelector('pre.code-err');
+    assert(pre, 'no pre.code-err found');
+    assertContains(pre.textContent, 'error message');
+  });
+
+  it('addCodeResultMsg shows green ✓ for exit 0', () => {
+    resetAll();
+    addCodeResultMsg({ stdout: 'ok', stderr: '', exit_code: 0, elapsed_s: 0.1 });
+    const header = document.querySelector('.code-result-header.ok');
+    assert(header, 'no .code-result-header.ok found');
+    assertContains(header.textContent, '✓');
+  });
+
+  it('addCodeResultMsg shows red ✗ for non-zero exit', () => {
+    resetAll();
+    addCodeResultMsg({ stdout: '', stderr: 'fail', exit_code: 1 });
+    const header = document.querySelector('.code-result-header.err');
+    assert(header, 'no .code-result-header.err found');
+    assertContains(header.textContent, '✗');
+  });
+
+  it('addCodeResultMsg shows error when result.error is set', () => {
+    resetAll();
+    addCodeResultMsg({ error: 'Cannot reach server', exit_code: -1 });
+    const header = document.querySelector('.code-result-header.err');
+    assert(header);
+    assertContains(header.textContent, 'Cannot reach server');
+  });
+
+  it('runCode handles fetch failure gracefully', async () => {
+    resetAll();
+    state.config.codeEndpoint = 'http://localhost:9999/execute';
+    window.fetch = () => Promise.reject(new Error('Network failure'));
+    await runCode('pass');
+    assertContains(chatText(), 'Cannot reach code server');
+    assertContains(chatText(), 'Network failure');
+  });
+});
+
+// ── 18. Integration — runInference with streaming ────────────────────────
+describe('Integration — runInference with streaming', () => {
+  it('runInference with stream:true uses streamOpenAICompat', async () => {
+    resetAll();
+    state.config = { stream: true, backend: 'openai-compat', endpoint: 'http://e', model: 'm', temperature: 0.8, maxTokens: 50, systemPrompt: 's' };
+    state.messages = [{ role: 'user', content: 'hi' }];
+
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"Stream"}}]}\n',
+      'data: {"choices":[{"delta":{"content":"ing"}}]}\n',
+      'data: [DONE]\n',
+    ];
+    window.fetch = () => Promise.resolve({
+      ok: true, status: 200,
+      body: new ReadableStream({
+        async start(controller) {
+          for (const c of chunks) controller.enqueue(new TextEncoder().encode(c));
+          controller.close();
+        }
+      }),
+      json: () => Promise.resolve({}),
+      text: () => Promise.resolve(''),
+    });
+
+    await runInference();
+
+    // Check state.messages was updated
+    assertEqual(state.messages.length, 2);
+    assertEqual(state.messages[1].role, 'assistant');
+    assertEqual(state.messages[1].content, 'Streaming');
+
+    // Check DOM has the live bot bubble
+    assertContains(chatText(), 'Streaming');
+  });
+
+  it('runInference with stream:false uses non-streaming callLLM', async () => {
+    resetAll();
+    state.config = { stream: false, backend: 'openai-compat', endpoint: 'http://e', model: 'm', temperature: 0.8, maxTokens: 50, systemPrompt: 's' };
+    state.messages = [{ role: 'user', content: 'hi' }];
+
+    okFetch({ choices: [{ message: { content: 'Non-streaming response' } }] });
+
+    await runInference();
+
+    assertEqual(state.messages.length, 2);
+    assertEqual(state.messages[1].content, 'Non-streaming response');
+    assertContains(chatText(), 'Non-streaming response');
+  });
+
+  it('runInference with stream:true on Anthropic backend uses streamAnthropic', async () => {
+    resetAll();
+    state.config = { stream: true, backend: 'anthropic', apiKey: 'sk-test', model: 'claude', temperature: 0.5, maxTokens: 50, systemPrompt: 's' };
+    state.messages = [{ role: 'user', content: 'hi' }];
+
+    const chunks = [
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Ant"}}\n',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hropic"}}\n',
+      'data: {"type":"message_stop"}\n',
+    ];
+    window.fetch = () => Promise.resolve({
+      ok: true, status: 200,
+      body: new ReadableStream({
+        async start(controller) {
+          for (const c of chunks) controller.enqueue(new TextEncoder().encode(c));
+          controller.close();
+        }
+      }),
+      json: () => Promise.resolve({}),
+      text: () => Promise.resolve(''),
+    });
+
+    await runInference();
+
+    assertEqual(state.messages.length, 2);
+    assertEqual(state.messages[1].content, 'Anthropic');
+  });
+
+  it('runInference removes botBubble on streaming error', async () => {
+    resetAll();
+    state.config = { stream: true, backend: 'openai-compat', endpoint: 'http://e', model: 'm', temperature: 0.8, maxTokens: 50, systemPrompt: 's' };
+    state.messages = [{ role: 'user', content: 'hi' }];
+
+    window.fetch = () => Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve('Server error'), json: () => Promise.resolve({}) });
+
+    await runInference();
+
+    // Error bubble should be present, not a partial stream bubble
+    assertContains(chatText(), 'Error:');
+    assertContains(chatText(), 'HTTP 500');
+  });
+
+  it('runInference sets state.busy during execution', async () => {
+    resetAll();
+    state.config = { stream: false };
+    state.messages = [{ role: 'user', content: 'hi' }];
+
+    let busyDuringFetch = false;
+    window.fetch = async () => {
+      busyDuringFetch = state.busy;
+      return { ok: true, status: 200, json: () => Promise.resolve({ choices: [{ message: { content: 'ok' } }] }), text: () => Promise.resolve('') };
+    };
+
+    await runInference();
+
+    assert(busyDuringFetch, 'state.busy should be true during fetch');
+    assertEqual(state.busy, false, 'state.busy should be false after completion');
   });
 });
 
