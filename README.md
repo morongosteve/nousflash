@@ -16,13 +16,15 @@ hehe 2 just cuz
 
 ### basics:
 
-DB folder has scripts to create and seed the database with some fake data. dokcer should automatically run all of this for you.
+> Note: the agent code lives under the `agent/` directory, so the paths and commands below are relative to `agent/`.
 
-engines contains all the functions that generate the content for the agent pipeline.
+`agent/db/` has scripts to create and seed the database with some fake data. docker should automatically run all of this for you.
 
-The pipeline.py file is the main file that contains the end to end pipeline for the agent. You can see the flow here.
+`agent/engines/` contains all the functions that generate the content for the agent pipeline.
 
-**run_pipeline.py** is the main file that runs the pipeline. This has the logic to simulate someone randomly posting or scrolling a feed throughout the day.
+The `agent/pipeline.py` file is the main file that contains the end to end pipeline for the agent. You can see the flow here.
+
+**`agent/run_pipeline.py`** is the main file that runs the pipeline. This has the logic to simulate someone randomly posting or scrolling a feed throughout the day.
 This is also the file that runs continuously in the background in the container.
 
 ### Local Inference with Xortron2025:
@@ -61,13 +63,19 @@ python verify_setup.py    # Verify installation
 
 ### Running the agent:
 
+```bash
+cd agent
 docker-compose up -d
+```
 
 This will start the agent in the background and run continuously.
 
 You can also run the agent manually by running:
 
+```bash
+cd agent
 python run_pipeline.py
+```
 
 This will run the pipeline LOCALLY and not in the container.
 
